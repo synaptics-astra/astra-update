@@ -1,0 +1,12 @@
+message(STATUS "Configuring for Windows")
+
+# Define a macro for Windows platform
+add_definitions(-DPLATFORM_WINDOWS)
+
+# Set Windows-specific compiler flags
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /DWIN32 /D_WINDOWS /W3 /GR /EHsc")
+
+# Add any Windows-specific libraries
+# Example: find_package(SomeWindowsSpecificLibrary REQUIRED)
+# include_directories(${SomeWindowsSpecificLibrary_INCLUDE_DIRS})
+# target_link_libraries(${PROJECT_NAME} ${SomeWindowsSpecificLibrary_LIBRARIES})

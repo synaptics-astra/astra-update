@@ -1,0 +1,13 @@
+Debug:
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config debug
+
+Release:
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config release
+
+Mac:
+cmake -B build_x86_64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64"
+cmake --build build_x86_64 --config release
+cmake -B build_arm64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64"
+cmake --build build_arm64 --config release
