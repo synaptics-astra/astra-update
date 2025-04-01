@@ -151,7 +151,7 @@ public:
     {
         ASTRA_LOG;
 
-        if (m_uEnvSupport && m_resetWhenComplete) {
+        if (m_uEnvSupport) {
             for (;;) {
                 std::unique_lock<std::mutex> lock(m_deviceEventMutex);
                 m_deviceEventCV.wait(lock);
