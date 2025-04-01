@@ -188,7 +188,7 @@ int main(int argc, char* argv[])
     try {
         deviceManager.Boot(bootImagePath);
      } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize update: " << e.what() << std::endl;
+        std::cerr << "Failed to initialize boot: " << e.what() << std::endl;
         return -1;
      }
 
@@ -227,14 +227,8 @@ int main(int argc, char* argv[])
                     std::cout << "Booting Device: " << deviceResponse.m_deviceName << std::endl;
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
                     std::cout << "Booting " << deviceResponse.m_deviceName << " is complete" << std::endl;
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_START) {
-                    std::cout << "Updating Device: " << deviceResponse.m_deviceName << std::endl;
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
-                    std::cout << "Device: " << deviceResponse.m_deviceName << " Update Complete" << std::endl;
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
                     std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: " << deviceResponse.m_message << std::endl;
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL) {
-                    std::cout << "Device: " << deviceResponse.m_deviceName << " Update Failed: " << deviceResponse.m_message << std::endl;
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_START ||
                     deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS ||
                     deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE)
