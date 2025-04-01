@@ -107,10 +107,12 @@ bool AstraBootImage::Load()
                 }
             }
         }
+        m_directoryName = std::filesystem::path(m_path).filename().string();
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Loaded boot images: " << m_directoryName << endLog;
+    } else {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Boot image path does not exist: " << m_path << endLog;
+        return false;
     }
-
-    m_directoryName = std::filesystem::path(m_path).filename().string();
-    log(ASTRA_LOG_LEVEL_DEBUG) << "Loaded boot images: " << m_directoryName << endLog;
 
     return true;
 }
