@@ -94,7 +94,7 @@ public:
 
             // If uEnv.txt is not in the image list and uEnv is supported
             // then create a uEnv image in the temp directory using the boot command
-            if (it == m_images.end() && m_uEnvSupport && !m_bootCommand.empty()) {
+            if (it == m_images.end() && m_uEnvSupport) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Adding uEnv.txt to image list" << endLog;
                 Image uEnvImage(m_deviceDir + "/" + m_uEnvFilename, ASTRA_IMAGE_TYPE_BOOT);
 
