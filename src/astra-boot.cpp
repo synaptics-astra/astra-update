@@ -113,6 +113,7 @@ int main(int argc, char* argv[])
         ("m,memory-layout", "Memory layout", cxxopts::value<std::string>())
         ("u,usb-debug", "Enable USB debug logging", cxxopts::value<bool>()->default_value("false"))
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
+        ("o,boot-command", "Boot command", cxxopts::value<std::string>()->default_value(""))
         ("boot-image", "Boot Image Path", cxxopts::value<std::string>())
         ("v,version", "Print version");
 
@@ -146,6 +147,7 @@ int main(int argc, char* argv[])
     AstraLogLevel logLevel = debug ?  ASTRA_LOG_LEVEL_DEBUG : ASTRA_LOG_LEVEL_INFO;
     bool usbDebug = result["usb-debug"].as<bool>();
     bool simpleProgress = result["simple-progress"].as<bool>();
+    std::string bootCommand = result["boot-command"].as<std::string>();
 
     if (usbDebug) {
         // Use simple progress when USB debugging is enabled
@@ -186,7 +188,7 @@ int main(int argc, char* argv[])
     AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, usbDebug);
 
     try {
-        deviceManager.Boot(bootImagePath);
+        deviceManager.Boot(bootImagePath, bootCommand);
      } catch (const std::exception& e) {
         std::cerr << "Failed to initialize boot: " << e.what() << std::endl;
         return -1;
