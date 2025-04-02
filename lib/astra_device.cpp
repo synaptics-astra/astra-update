@@ -18,8 +18,8 @@
 
 class AstraDevice::AstraDeviceImpl {
 public:
-    AstraDeviceImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir, const std::string &bootCommand)
-        : m_usbDevice{std::move(device)}, m_tempDir{tempDir}, m_bootCommand{bootCommand}
+    AstraDeviceImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly, const std::string &bootCommand)
+        : m_usbDevice{std::move(device)}, m_tempDir{tempDir}, m_bootOnly{bootOnly}, m_bootCommand{bootCommand}
     {
         ASTRA_LOG;
     }
@@ -47,8 +47,6 @@ public:
         m_ubootConsole = bootImage->GetUbootConsole();
         m_uEnvSupport = bootImage->GetUEnvSupport();
         m_finalBootImage = bootImage->GetFinalBootImage();
-
-        m_bootOnly = bootImage->IsLinuxBoot();
 
         ret = m_usbDevice->Open(std::bind(&AstraDeviceImpl::USBEventHandler, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
         if (ret < 0) {
@@ -324,7 +322,7 @@ private:
 
         auto it = message.find(m_imageRequestString);
         if (it != std::string::npos) {
-            if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+            if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && !m_bootOnly) {
                 m_status = ASTRA_DEVICE_STATUS_UPDATE_START;
             }
 
@@ -634,8 +632,8 @@ private:
     }
 };
 
-AstraDevice::AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, const std::string &bootCommand) :
-    pImpl{std::make_unique<AstraDeviceImpl>(std::move(device), tempDir, bootCommand)} {}
+AstraDevice::AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly, const std::string &bootCommand) :
+    pImpl{std::make_unique<AstraDeviceImpl>(std::move(device), tempDir, bootOnly, bootCommand)} {}
 
 AstraDevice::~AstraDevice() = default;
 

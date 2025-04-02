@@ -31,7 +31,7 @@ class AstraDeviceManagerResponse;
 class AstraDevice
 {
 public:
-    AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, const std::string &bootCommand);
+    AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly, const std::string &bootCommand);
     ~AstraDevice();
 
     void SetStatusCallback(std::function<void(AstraDeviceManagerResponse)> statusCallback);

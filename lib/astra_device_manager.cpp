@@ -271,7 +271,9 @@ private:
         ASTRA_LOG;
 
         log(ASTRA_LOG_LEVEL_DEBUG) << "Device added AstraDeviceManagerImpl::DeviceAddedCallback" << endLog;
-        std::shared_ptr<AstraDevice> astraDevice = std::make_shared<AstraDevice>(std::move(device), m_tempDir, m_bootCommand);
+
+        std::shared_ptr<AstraDevice> astraDevice = std::make_shared<AstraDevice>(std::move(device), m_tempDir,
+            m_managerMode == ASTRA_DEVICE_MANAGER_MODE_BOOT, m_bootCommand);
 
         std::lock_guard<std::mutex> lock(m_devicesMutex);
         m_deviceFound = true;
