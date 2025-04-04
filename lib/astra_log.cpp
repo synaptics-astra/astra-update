@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 Synaptics Incorporated
+
 #include "astra_log.hpp"
 #include <iostream>
 #include <mutex>

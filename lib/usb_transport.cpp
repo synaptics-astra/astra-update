@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 Synaptics Incorporated
+
 #include <iostream>
 #include <iomanip>
 #include <libusb-1.0/libusb.h>
