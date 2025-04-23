@@ -152,7 +152,7 @@ public:
     {
         ASTRA_LOG;
 
-        if (m_uEnvSupport) {
+        if (m_uEnvSupport || m_ubootConsole == ASTRA_UBOOT_CONSOLE_UART) {
             for (;;) {
                 std::unique_lock<std::mutex> lock(m_deviceEventMutex);
                 m_deviceEventCV.wait(lock);
