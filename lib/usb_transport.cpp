@@ -41,12 +41,31 @@ void USBTransport::DeviceMonitorThread()
 }
 
 // Windows overrides this function in win_usb_transport.cpp. Add code which needs to run on Windows to that function as well.
-int USBTransport::Init(uint16_t vendorId, uint16_t productId, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback)
+int USBTransport::Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts,
+    std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback)
 {
     ASTRA_LOG;
 
     m_vendorId = vendorId;
     m_productId = productId;
+
+    if (!filterPorts.empty()) {
+        size_t start = 0;
+        size_t end = 0;
+        while ((end = filterPorts.find(',', start)) != std::string::npos) {
+            std::string port = filterPorts.substr(start, end - start);
+            if (!port.empty()) {
+                m_filterPorts.push_back(port);
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Adding filter port: " << port << endLog;
+            }
+            start = end + 1;
+        }
+        std::string lastPort = filterPorts.substr(start);
+        if (!lastPort.empty()) {
+            m_filterPorts.push_back(lastPort);
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Adding filter port: " << lastPort << endLog;
+        }
+    }
 
     int ret = libusb_init(&m_ctx);
     if (ret < 0) {
@@ -114,6 +133,44 @@ void USBTransport::StartDeviceMonitor()
     m_deviceMonitorThread = std::thread(&USBTransport::DeviceMonitorThread, this);
 }
 
+std::string USBTransport::ConstructUSBPath(libusb_device *device)
+{
+    ASTRA_LOG;
+
+    std::stringstream portStream;
+    uint8_t portNumbers[8];
+    uint8_t bus = libusb_get_bus_number(device);
+    uint8_t port = libusb_get_port_number(device);
+    int numElementsInPath = libusb_get_port_numbers(device, portNumbers, 8);
+    portStream << static_cast<int>(bus) << "-";
+    if (numElementsInPath > 0) {
+        portStream << static_cast<int>(portNumbers[0]);
+        for (int i = 1; i < numElementsInPath; ++i) {
+            portStream << "." << static_cast<int>(portNumbers[i]);
+        }
+    }
+
+    log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << portStream.str() << endLog;
+    return portStream.str();
+}
+
+bool USBTransport::IsValidPort(libusb_device *device, const std::string &devicePath)
+{
+    ASTRA_LOG;
+
+    if (m_filterPorts.empty()) {
+        return true;
+    }
+
+    for (const auto& port : m_filterPorts) {
+        if (devicePath.rfind(port, 0) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 int LIBUSB_CALL USBTransport::HotplugEventCallback(libusb_context *ctx, libusb_device *device,
                                                 libusb_hotplug_event event, void *user_data)
 {
@@ -148,7 +205,13 @@ int LIBUSB_CALL USBTransport::HotplugEventCallback(libusb_context *ctx, libusb_d
         log(ASTRA_LOG_LEVEL_INFO) << "  iSerialNumber: " << static_cast<int>(desc.iSerialNumber) << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "  bNumConfigurations: " << static_cast<int>(desc.bNumConfigurations) << endLog;
 
-        std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, transport->m_ctx);
+        std::string usbPath = transport->ConstructUSBPath(device);
+        if (!transport->IsValidPort(device, usbPath)) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Device is not on a port we are monitoring" << endLog;
+            return 0;
+        }
+
+        std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, transport->m_ctx);
         if (transport->m_deviceAddedCallback) {
             try {
                 transport->m_deviceAddedCallback(std::move(usbDevice));

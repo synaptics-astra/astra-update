@@ -33,6 +33,7 @@ public:
         AstraLogLevel minLogLevel = ASTRA_LOG_LEVEL_WARNING,
         const std::string &logPath = "",
         const std::string &tempDir = "",
+        const std::string &filterPorts = "",
         bool usbDebug = false
     );
     ~AstraDeviceManager();

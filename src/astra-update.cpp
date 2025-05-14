@@ -119,6 +119,7 @@ int main(int argc, char* argv[])
         ("m,memory-layout", "Memory layout", cxxopts::value<std::string>())
         ("u,usb-debug", "Enable USB debug logging", cxxopts::value<bool>()->default_value("false"))
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
+        ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
         ("v,version", "Print version");
 
     cxxopts::ParseResult result;
@@ -150,6 +151,7 @@ int main(int argc, char* argv[])
     AstraLogLevel logLevel = debug ?  ASTRA_LOG_LEVEL_DEBUG : ASTRA_LOG_LEVEL_INFO;
     bool usbDebug = result["usb-debug"].as<bool>();
     bool simpleProgress = result["simple-progress"].as<bool>();
+    std::string filterPorts = result["port"].as<std::string>();
 
     if (usbDebug) {
         // Use simple progress when USB debugging is enabled
@@ -210,7 +212,7 @@ int main(int argc, char* argv[])
     std::cout << "    Memory Layout: " << AstraMemoryLayoutToString(flashImage->GetMemoryLayout()) << std::endl;
     std::cout << "    Boot Image ID: " << flashImage->GetBootImageId() << "\n" << std::endl;
 
-    AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, usbDebug);
+    AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);
 
     try {
         deviceManager.Update(flashImage, bootImagesPath);

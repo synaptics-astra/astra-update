@@ -9,7 +9,7 @@
 #include "usb_device.hpp"
 #include "astra_log.hpp"
 
-USBDevice::USBDevice(libusb_device *device, libusb_context *ctx)
+USBDevice::USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx)
 {
     ASTRA_LOG;
 
@@ -33,6 +33,7 @@ USBDevice::USBDevice(libusb_device *device, libusb_context *ctx)
     m_bulkInSize = 0;
     m_bulkOutSize = 0;
     m_bulkTransferTimeout = 1000;
+    m_usbPath = usbPath;
 }
 
 USBDevice::~USBDevice()
@@ -101,22 +102,7 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
         }
     }
 
-    uint8_t *portNumbers = new uint8_t[8];
-    uint8_t bus = libusb_get_bus_number(libusb_get_device(m_handle));
-    uint8_t port = libusb_get_port_number(libusb_get_device(m_handle));
-    int numElementsInPath = libusb_get_port_numbers(libusb_get_device(m_handle), portNumbers, 8);
-    std::stringstream usbPathStream;
-    usbPathStream << static_cast<int>(bus) << "-";
-    log(ASTRA_LOG_LEVEL_DEBUG) << "Number of Elements in Path: " << numElementsInPath << endLog;
-    if (numElementsInPath > 0) {
-        usbPathStream << static_cast<int>(portNumbers[0]);
-        for (int i = 1; i < numElementsInPath; ++i) {
-            usbPathStream << "." << static_cast<int>(portNumbers[i]);
-        }
-    }
-    delete[] portNumbers;
-    m_usbPath = usbPathStream.str();
-    log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << usbPathStream.str() << endLog;
+    log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << m_usbPath << endLog;
 
     ret = libusb_detach_kernel_driver(m_handle, 0);
     if (ret < 0) {

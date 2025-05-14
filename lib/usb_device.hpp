@@ -16,7 +16,7 @@
 
 class USBDevice : public Device {
 public:
-    USBDevice(libusb_device *device, libusb_context *ctx);
+    USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx);
     ~USBDevice();
 
     enum USBEvent {
