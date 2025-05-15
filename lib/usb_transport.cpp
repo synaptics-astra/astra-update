@@ -18,6 +18,11 @@ USBTransport::~USBTransport()
 {
     ASTRA_LOG;
     Shutdown();
+
+    if (m_ctx) {
+        libusb_exit(m_ctx);
+        m_ctx = nullptr;
+    }
 }
 
 void USBTransport::DeviceMonitorThread()
@@ -99,10 +104,6 @@ void USBTransport::Shutdown()
         libusb_interrupt_event_handler(m_ctx);
         if (m_deviceMonitorThread.joinable()) {
             m_deviceMonitorThread.join();
-        }
-
-        if (m_ctx) {
-            libusb_exit(m_ctx);
         }
     }
 }

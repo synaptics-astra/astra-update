@@ -121,12 +121,13 @@ public:
     {
         ASTRA_LOG;
 
+        m_transport->Shutdown();
+
         std::lock_guard<std::mutex> lock(m_devicesMutex);
         for (auto& device : m_devices) {
             device->Close();
         }
         m_devices.clear();
-        m_transport->Shutdown();
         AstraLogStore::getInstance().Close();
 
         if (m_removeTempOnClose) {
