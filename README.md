@@ -93,6 +93,8 @@ Astra Update also has additional command line parameters for providing details a
 * -M, --manifest arg - specify the path to a ``manifest.yaml`` file.
 * -u, --usb-debug - enable libusb debugging and output it to the console.
 * -S, --simple-progress - print progress messages instead of using indicator progress bars. Better for logging.
+* -p, port - Filter devices based on their port. USB devices from other ports will be ignored. Ports provided in a comma
+    separated string (ie, "1-2,3-9").
 
 These command line parameters describe the update image. If the image contains a ``manifest.yaml`` file then these parameters will override those in the file.
 
@@ -165,6 +167,20 @@ Build a debug version using the debug build type.
     cmake -B build -DCMAKE_BUILD_TYPE=Debug
     cmake --build build --config debug
 ```
+
+#### Building on Windows
+
+On Windows, the first ``cmake`` command will generate Visual Studio Project files. The generated project and solution files will be located in the ``build`` directory.
+
+Use the CMake Generator option to specify a specific version of Visual Studio.
+
+```bash
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Visual Studio 16 2019"
+```
+
+Next, open the solution file in Visual Studio or use the ``cmake --build`` command to build using the command line.
+
+#### Building on Mac OS
 
 Building on Mac OS allows the architecture to be set on the command line. If this option is not set the native architecture will be used.
 
