@@ -25,8 +25,9 @@ public:
     AstraDeviceManagerImpl(std::function<void(AstraDeviceManagerResponse)> responseCallback,
         bool runContinuously,
         AstraLogLevel minLogLevel, const std::string &logPath,
-        const std::string &tempDir, bool usbDebug)
-        : m_responseCallback{responseCallback}, m_runContinuously{runContinuously}, m_usbDebug{usbDebug}
+        const std::string &tempDir, const std::string &filterPorts, bool usbDebug)
+        : m_responseCallback{responseCallback}, m_runContinuously{runContinuously}, m_filterPorts{filterPorts},
+          m_usbDebug{usbDebug}
     {
         if (tempDir.empty()) {
             m_tempDir = MakeTempDirectory();
@@ -160,6 +161,7 @@ private:
     bool m_usbDebug = false;
     bool m_failureReported = false;
     std::string m_modifiedLogPath;
+    std::string m_filterPorts;
 
     std::vector<std::shared_ptr<AstraDevice>> m_devices;
     std::mutex m_devicesMutex;
@@ -189,7 +191,7 @@ private:
         m_transport = std::make_unique<USBTransport>(m_usbDebug);
 #endif
 
-        if (m_transport->Init(vendorId, productId,
+        if (m_transport->Init(vendorId, productId, m_filterPorts,
                 std::bind(&AstraDeviceManagerImpl::DeviceAddedCallback, this, std::placeholders::_1)) < 0)
         {
             throw std::runtime_error("Failed to initialize USB transport");
@@ -290,9 +292,9 @@ private:
 AstraDeviceManager::AstraDeviceManager(std::function<void(AstraDeviceManagerResponse)> responseCallback,
     bool runContinuously,
     AstraLogLevel minLogLevel, const std::string &logPath,
-    const std::string &tempDir, bool usbDebug)
+    const std::string &tempDir, const std::string &filterPorts, bool usbDebug)
     : pImpl{std::make_unique<AstraDeviceManagerImpl>(responseCallback,
-        runContinuously, minLogLevel, logPath, tempDir, usbDebug)}
+        runContinuously, minLogLevel, logPath, tempDir, filterPorts, usbDebug)}
 {}
 
 AstraDeviceManager::~AstraDeviceManager() = default;

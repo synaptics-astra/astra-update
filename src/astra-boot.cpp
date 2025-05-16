@@ -118,6 +118,7 @@ int main(int argc, char* argv[])
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
         ("o,boot-command", "Boot command", cxxopts::value<std::string>()->default_value(""))
         ("boot-image", "Boot Image Path", cxxopts::value<std::string>())
+        ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
         ("v,version", "Print version");
 
     options.parse_positional({"boot-image"});
@@ -151,6 +152,7 @@ int main(int argc, char* argv[])
     bool usbDebug = result["usb-debug"].as<bool>();
     bool simpleProgress = result["simple-progress"].as<bool>();
     std::string bootCommand = result["boot-command"].as<std::string>();
+    std::string filterPorts = result["port"].as<std::string>();
 
     if (usbDebug) {
         // Use simple progress when USB debugging is enabled
@@ -188,7 +190,7 @@ int main(int argc, char* argv[])
 
     std::cout << "Astra Boot\n" << std::endl;
 
-    AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, usbDebug);
+    AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);
 
     try {
         deviceManager.Boot(bootImagePath, bootCommand);

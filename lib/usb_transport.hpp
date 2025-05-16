@@ -20,7 +20,8 @@ public:
     {}
     virtual ~USBTransport();
 
-    virtual int Init(uint16_t vendorId, uint16_t productId, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback);
+    virtual int Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts,
+        std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback);
     virtual void Shutdown();
 
     void StartDeviceMonitor();
@@ -35,8 +36,11 @@ protected:
     std::mutex m_shutdownMutex;
     uint16_t m_vendorId;
     uint16_t m_productId;
+    std::vector<std::string> m_filterPorts;
 
     void DeviceMonitorThread();
+    std::string ConstructUSBPath(libusb_device *device);
+    bool IsValidPort(libusb_device *device, const std::string &portString);
 
     static int LIBUSB_CALL HotplugEventCallback(libusb_context *ctx, libusb_device *device,
                                                 libusb_hotplug_event event, void *user_data);

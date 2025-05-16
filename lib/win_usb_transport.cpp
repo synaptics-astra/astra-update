@@ -145,6 +145,12 @@ void WinUSBTransport::OnDeviceArrived()
             continue;
         }
 
+        std::string usbPath = transport->ConstructUSBPath(device);
+        if (!IsValidPort(device, usbPath)) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Device is not on a port we are monitoring" << endLog;
+            continue;
+        }
+
         if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
             std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, m_ctx);
             if (m_deviceAddedCallback) {
