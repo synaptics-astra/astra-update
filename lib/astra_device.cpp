@@ -99,6 +99,14 @@ public:
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Adding uEnv.txt to image list" << endLog;
                 Image uEnvImage(m_deviceDir + "/" + m_uEnvFilename, ASTRA_IMAGE_TYPE_BOOT);
 
+                if (m_bootCommand.empty()) {
+                    // if m_bootCommand is empty then booting
+                    // is complete after uEnv.txt is loaded.
+                    // Even if the boot image contains additional
+                    // boot images.
+                    m_finalBootImage = m_uEnvFilename;
+                }
+
                 WriteUEnvFile(m_bootCommand);
 
                 m_images.push_back(uEnvImage);
@@ -589,11 +597,14 @@ private:
                     log(ASTRA_LOG_LEVEL_DEBUG) << "Image sent successfully: " << image->GetName() << " final boot image '" << m_finalBootImage << "' final update image : '" << m_finalUpdateImage << "'" << endLog;
                     if (!m_finalBootImage.empty() && image->GetName().find(m_finalBootImage) != std::string::npos) {
                         log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot image sent" << endLog;
-                        m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
+
                         if (!m_bootOnly) {
                             // ASTRA_DEVICE_STATUS_BOOT_COMPLETE will get sent from WaitForCompletion when
                             // in boot only mode.
+                            m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
                             SendStatus(m_status, 100, "", "Success");
+                        } else {
+                            waitForSizeRequest = true;
                         }
                     } else if (!m_finalUpdateImage.empty() && image->GetName().find(m_finalUpdateImage) != std::string::npos) {
                         log(ASTRA_LOG_LEVEL_DEBUG) << "Final update image sent" << endLog;
