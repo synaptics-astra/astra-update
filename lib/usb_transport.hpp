@@ -39,6 +39,7 @@ protected:
     std::vector<std::string> m_filterPorts;
 
     void DeviceMonitorThread();
+    std::vector<std::string> ParseFilterPortString(const std::string& filterPorts);
     std::string ConstructUSBPath(libusb_device *device);
     bool IsValidPort(libusb_device *device, const std::string &portString);
 
