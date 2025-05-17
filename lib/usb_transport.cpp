@@ -54,23 +54,7 @@ int USBTransport::Init(uint16_t vendorId, uint16_t productId, const std::string 
     m_vendorId = vendorId;
     m_productId = productId;
 
-    if (!filterPorts.empty()) {
-        size_t start = 0;
-        size_t end = 0;
-        while ((end = filterPorts.find(',', start)) != std::string::npos) {
-            std::string port = filterPorts.substr(start, end - start);
-            if (!port.empty()) {
-                m_filterPorts.push_back(port);
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Adding filter port: " << port << endLog;
-            }
-            start = end + 1;
-        }
-        std::string lastPort = filterPorts.substr(start);
-        if (!lastPort.empty()) {
-            m_filterPorts.push_back(lastPort);
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Adding filter port: " << lastPort << endLog;
-        }
-    }
+    m_filterPorts = ParseFilterPortString(filterPorts);
 
     int ret = libusb_init(&m_ctx);
     if (ret < 0) {
@@ -132,6 +116,33 @@ void USBTransport::StartDeviceMonitor()
     ASTRA_LOG;
 
     m_deviceMonitorThread = std::thread(&USBTransport::DeviceMonitorThread, this);
+}
+
+std::vector<std::string> USBTransport::ParseFilterPortString(const std::string & filterPorts)
+{
+    ASTRA_LOG;
+
+    std::vector<std::string> filterList;
+
+    if (!filterPorts.empty()) {
+        size_t start = 0;
+        size_t end = 0;
+        while ((end = filterPorts.find(',', start)) != std::string::npos) {
+            std::string port = filterPorts.substr(start, end - start);
+            if (!port.empty()) {
+                filterList.push_back(port);
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Adding filter port: " << port << endLog;
+            }
+            start = end + 1;
+        }
+        std::string lastPort = filterPorts.substr(start);
+        if (!lastPort.empty()) {
+            filterList.push_back(lastPort);
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Adding filter port: " << lastPort << endLog;
+        }
+    }
+
+    return filterList;
 }
 
 std::string USBTransport::ConstructUSBPath(libusb_device *device)
