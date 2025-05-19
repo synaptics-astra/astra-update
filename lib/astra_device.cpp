@@ -112,6 +112,13 @@ public:
                 m_images.push_back(uEnvImage);
             }
 
+            if (!m_bootOnly && bootImage->IsLinuxBoot()) {
+                // Update can use a boot image which also contains
+                // a Linux kernel and ramdisk. But, they will not be
+                // used during the update process.
+                m_finalBootImage = m_uEnvFilename;
+            }
+
             m_images.push_back(usbPathImage);
             m_images.push_back(*m_sizeRequestImage);
         }
