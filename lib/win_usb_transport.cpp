@@ -61,10 +61,6 @@ void WinUSBTransport::Shutdown()
         if (m_deviceMonitorThread.joinable()) {
             m_deviceMonitorThread.join();
         }
-
-        if (m_ctx) {
-            libusb_exit(m_ctx);
-        }
     }
 }
 
