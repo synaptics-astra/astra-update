@@ -150,6 +150,20 @@ void WinUSBTransport::OnDeviceArrived()
         }
 
         if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
+            // Windows calls OnDeviceArrived() when any USB device arrives, not
+            // just devices with a specific vid / pid. All USB devices are enumerated
+            // in this loop, including devices already in use by astra-update.
+            // On Windows try to open the device, if we get LIBUSB_ERROR_ACCESS then
+            // we are probably already using the device. If not, close the device so
+            // USBDevice can reopen it later.
+            libusb_device_handle *handle;
+            ret = libusb_open(device, &handle);
+            if (ret == LIBUSB_ERROR_ACCESS) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported LIBUSB_ERROR_ACCESS" << endLog;
+                continue;
+            }
+            libusb_close(handle);
+
             std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx);
             if (m_deviceAddedCallback) {
                 try {
