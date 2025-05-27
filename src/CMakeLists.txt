@@ -11,7 +11,7 @@ ExternalProject_Add(cxxopts
 
 ExternalProject_Add(indicators
     GIT_REPOSITORY https://github.com/p-ranav/indicators.git
-    GIT_TAG master
+    GIT_TAG ac6c93ea2b1f97a220d10a0729a625b3f51e320b
     PREFIX ${CMAKE_BINARY_DIR}/indicators
     CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/indicators
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
