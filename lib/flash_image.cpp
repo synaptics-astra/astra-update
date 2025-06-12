@@ -17,10 +17,16 @@ const std::string FlashImageTypeToString(FlashImageType type)
     switch (type) {
         case FLASH_IMAGE_TYPE_SPI:
             str = "spi";
+            break;
         case FLASH_IMAGE_TYPE_NAND:
             str = "nand";
+            break;
         case FLASH_IMAGE_TYPE_EMMC:
             str = "emmc";
+            break;
+        case FLASH_IMAGE_TYPE_UNKNOWN:
+            str = "unknown";
+            break;
         default:
             break;
     }
@@ -126,7 +132,7 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
 
     switch (flashImageType) {
         case FLASH_IMAGE_TYPE_SPI:
-            return std::make_unique<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, config);
+            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, config);
         case FLASH_IMAGE_TYPE_NAND:
             throw std::invalid_argument("NAND FlashImage not supported");
         case FLASH_IMAGE_TYPE_EMMC:
