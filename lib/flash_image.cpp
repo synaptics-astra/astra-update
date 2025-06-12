@@ -17,10 +17,16 @@ const std::string FlashImageTypeToString(FlashImageType type)
     switch (type) {
         case FLASH_IMAGE_TYPE_SPI:
             str = "spi";
+            break;
         case FLASH_IMAGE_TYPE_NAND:
             str = "nand";
+            break;
         case FLASH_IMAGE_TYPE_EMMC:
             str = "emmc";
+            break;
+        case FLASH_IMAGE_TYPE_UNKNOWN:
+            str = "unknown";
+            break;
         default:
             break;
     }
