@@ -126,7 +126,7 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
 
     switch (flashImageType) {
         case FLASH_IMAGE_TYPE_SPI:
-            return std::make_unique<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, config);
+            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, config);
         case FLASH_IMAGE_TYPE_NAND:
             throw std::invalid_argument("NAND FlashImage not supported");
         case FLASH_IMAGE_TYPE_EMMC:
