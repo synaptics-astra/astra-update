@@ -10,8 +10,8 @@ class EmmcFlashImage : public FlashImage
 public:
     EmmcFlashImage(std::string imagePath, std::string bootImage, std::string chipName,
             std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout,
-            std::map<std::string, std::string> config) : FlashImage(FLASH_IMAGE_TYPE_EMMC, imagePath,
-            bootImage, chipName, boardName, secureBootVersion, memoryLayout, config)
+            std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps) : FlashImage(FLASH_IMAGE_TYPE_EMMC, imagePath,
+            bootImage, chipName, boardName, secureBootVersion, memoryLayout, std::move(manifestMaps))
     {}
     virtual ~EmmcFlashImage()
     {}
