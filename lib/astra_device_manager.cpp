@@ -228,7 +228,7 @@ private:
     {
         ASTRA_LOG;
 
-        log(ASTRA_LOG_LEVEL_DEBUG) << "Booting device device" << endLog;
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Booting device" << endLog;
 
         if (astraDevice) {
             astraDevice->SetStatusCallback(m_responseCallback);
