@@ -7,63 +7,116 @@
 #include "spi_flash_image.hpp"
 #include "astra_log.hpp"
 
+void SpiFlashImage::ParseSpiFlashConfig(const std::map<std::string, std::string> &config, std::string imageFile)
+{
+    ASTRA_LOG;
+
+    SpiImageConfig spiConfig;
+
+    spiConfig.imageFile = imageFile;
+
+    // Allow spi command values from config override the default values
+    if (auto it = config.find("read_address"); it != config.end()) {
+        spiConfig.readAddress = it->second;
+    }
+
+    if (auto it = config.find("write_first_copy_address"); it != config.end()) {
+        spiConfig.writeFirstCopyAddress = it->second;
+    }
+
+    if (auto it = config.find("write_second_copy_address"); it != config.end()) {
+        spiConfig.writeSecondCopyAddress = it->second;
+    }
+
+    if (auto it = config.find("write_length"); it != config.end()) {
+        spiConfig.writeLength = it->second;
+    }
+
+    if (auto it = config.find("erase_first_start_address"); it != config.end()) {
+        spiConfig.eraseFirstStartAddress = it->second;
+    }
+
+    if (auto it = config.find("erase_first_length"); it != config.end()) {
+        spiConfig.eraseFirstLength = it->second;
+    }
+
+    if (auto it = config.find("erase_second_start_address"); it != config.end()) {
+        spiConfig.eraseSecondStartAddress = it->second;
+    }
+
+    if (auto it = config.find("erase_second_length"); it != config.end()) {
+        spiConfig.eraseSecondLength = it->second;
+    }
+
+    m_spiImageConfigs.push_back(spiConfig);
+}
+
 int SpiFlashImage::Load()
 {
     ASTRA_LOG;
 
     int ret = 0;
 
-    // Allow spi command values from config override the default values
-    if (m_config.find("read_address") != m_config.end()) {
-        m_readAddress = m_config["read_address"];
-    }
-    if (m_config.find("write_first_copy_address") != m_config.end()) {
-        m_writeFirstCopyAddress = m_config["write_first_copy_address"];
-    }
-    if (m_config.find("write_second_copy_address") != m_config.end()) {
-        m_writeSecondCopyAddress = m_config["write_second_copy_address"];
-    }
-    if (m_config.find("write_length") != m_config.end()) {
-        m_writeLength = m_config["write_length"];
-    }
-    if (m_config.find("erase_first_start_address") != m_config.end()) {
-        m_eraseFirstStartAddress = m_config["erase_first_start_address"];
-    }
-    if (m_config.find("erase_first_end_address") != m_config.end()) {
-        m_eraseFirstEndAddress = m_config["erase_first_end_address"];
-    }
-    if (m_config.find("erase_second_start_address") != m_config.end()) {
-        m_eraseSecondStartAddress = m_config["erase_second_start_address"];
-    }
-    if (m_config.find("erase_second_end_address") != m_config.end()) {
-        m_eraseSecondEndAddress = m_config["erase_second_end_address"];
-    }
-
     std::string imageFile;
-    if (m_config.find("image_file") != m_config.end()) {
-        imageFile = m_config["image_file"];
-        std::string fullImagePath = m_imagePath + "/" + imageFile;
-        if (std::filesystem::exists(fullImagePath)) {
-            m_images.push_back(Image(fullImagePath, ASTRA_IMAGE_TYPE_UPDATE_SPI));
-            m_finalImage = imageFile;
-        } else {
-            return -1;
+
+    if (m_manifestMaps && !m_manifestMaps->empty()) {
+        for (const auto &map : *m_manifestMaps) {
+            if (map.find("type") != map.end() && map.at("type") == "config") {
+                // If the manifest file contains a config section with an image_file entry,
+                // then this is a legacy manifest from before we supported multiple SPI images.
+                if (map.find("image_file") != map.end()) {
+                    imageFile = map.at("image_file");
+                    std::string fullImagePath = m_imagePath + "/" + imageFile;
+                    if (std::filesystem::exists(fullImagePath)) {
+                        m_images.push_back(Image(fullImagePath, ASTRA_IMAGE_TYPE_UPDATE_SPI));
+                        m_finalImage = imageFile;
+                        ParseSpiFlashConfig(map, imageFile);
+                    } else {
+                        return -1;
+                    }
+                }
+            } else if (map.find("type") != map.end() && map.at("type") == "image") {
+                // If the manifest file contains image sections, then we will use that to load the SPI images.
+                if (map.find("image_file") != map.end()) {
+                    imageFile = map.at("image_file");
+                    std::string fullImagePath = m_imagePath + "/" + imageFile;
+                    if (std::filesystem::exists(fullImagePath)) {
+                        m_images.push_back(Image(fullImagePath, ASTRA_IMAGE_TYPE_UPDATE_SPI));
+                        m_finalImage = imageFile;
+                        ParseSpiFlashConfig(map, imageFile);
+                    } else {
+                        return -1;
+                    }
+                }
+            }
         }
     } else {
         imageFile = std::filesystem::path(m_imagePath).filename().string();
         if (std::filesystem::exists(m_imagePath)) {
             m_images.push_back(Image(m_imagePath, ASTRA_IMAGE_TYPE_UPDATE_SPI));
             m_finalImage = imageFile;
+
+            // If no manifest file was provided, then we will use the default SPI flash configuration.
+            SpiImageConfig spiConfig;
+            spiConfig.imageFile = imageFile;
+            m_spiImageConfigs.push_back(spiConfig);
         } else {
             return -1;
         }
     }
 
     // Flash primary and secondary copies of the SPI U-Boot image
-    m_flashCommand = "usbload " + imageFile + " " + m_readAddress + "; spinit; erase " 
-        + m_eraseFirstStartAddress + " " + m_eraseFirstEndAddress + "; cp.b " + m_readAddress + " " + m_writeFirstCopyAddress
-        + " " + m_writeLength + "; erase " + m_eraseSecondStartAddress + " " + m_eraseSecondEndAddress
-        + "; cp.b " + m_readAddress + " " + m_writeSecondCopyAddress + " " + m_writeLength + ";" + m_resetCommand;
+    for (const auto &imageConfig : m_spiImageConfigs) {
+        m_flashCommand += "usbload " + imageConfig.imageFile + " " + imageConfig.readAddress + "; spinit; erase "
+            + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength + "; cp.b "
+            + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress
+            + " " + imageConfig.writeLength + "; erase "
+            + imageConfig.eraseSecondStartAddress + " " + imageConfig.eraseSecondLength
+            + "; cp.b " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress
+            + " " + imageConfig.writeLength + "; ";
+    }
+
+    m_flashCommand += m_resetCommand;
     m_resetWhenComplete = true;
 
     return ret;

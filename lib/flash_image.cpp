@@ -64,37 +64,67 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
         }
     }
 
+    std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps = std::make_unique<std::vector<std::map<std::string, std::string>>>();
+    std::map<std::string, std::string> configMap = config;
+    configMap["type"] = "config";
+
     try {
         YAML::Node manifestNode = YAML::LoadFile(manifest);
 
         // If the image has a manifest file, but options were supplied on the command line,
         // then have the command line options take precedence.
-        for (YAML::const_iterator it = manifestNode.begin(); it != manifestNode.end(); ++it) {
-            if (config.find(it->first.as<std::string>()) == config.end()) {
-                config[it->first.as<std::string>()] = it->second.as<std::string>();
+         for (YAML::const_iterator it = manifestNode.begin(); it != manifestNode.end(); ++it) {
+            std::string key = it->first.as<std::string>();
+            const YAML::Node& value = it->second;
+
+            if (configMap.find(key) == configMap.end()) {
+                if (value.IsScalar()) {
+                    configMap[key] = value.as<std::string>();
+                } else {
+                    if (key == "images") {
+                        for (const auto& imageEntry : value) {
+                            std::string imageName = imageEntry.first.as<std::string>();
+                            YAML::Node imageProps = imageEntry.second;
+
+                            if (imageProps.IsMap()) {
+                                std::map<std::string, std::string> imageMap;
+                                imageMap["type"] = "image";
+                                imageMap["image_file"] = imageName;
+
+                                for (const auto& prop : imageProps) {
+                                    std::string propName = prop.first.as<std::string>();
+                                    std::string propVal = prop.second.as<std::string>();
+                                    imageMap[propName] = propVal;
+                                }
+
+                                manifestMaps->push_back(imageMap);
+                            }
+                        }
+                    }
+                }
             }
         }
-    }
-    catch (const YAML::BadFile& e) {
+        manifestMaps->push_back(configMap);
+    } catch (const YAML::BadFile& e) {
         ;; // No manifest file, but we might have command line values
     } catch (const std::exception& e) {
         throw std::invalid_argument("Invalid Manifest");
     }
 
-    std::string bootImage = config["boot_image"];
-    std::string chipName = config["chip"];
+    std::string bootImage = configMap["boot_image"];
+    std::string chipName = configMap["chip"];
     std::transform(chipName.begin(), chipName.end(), chipName.begin(), ::tolower);
 
-    std::string boardName = config["board"];
+    std::string boardName = configMap["board"];
     std::transform(boardName.begin(), boardName.end(), boardName.begin(), ::tolower);
 
     FlashImageType flashImageType = FLASH_IMAGE_TYPE_UNKNOWN;
-    if (config.find("image_type") != config.end()) {
-        flashImageType = StringToFlashImageType(config["image_type"]);
+    if (configMap.find("image_type") != configMap.end()) {
+        flashImageType = StringToFlashImageType(configMap["image_type"]);
     }
 
-    std::string secureBoot = config["secure_boot"];
-    std::string memoryLayoutString = config["memory_layout"];
+    std::string secureBoot = configMap["secure_boot"];
+    std::string memoryLayoutString = configMap["memory_layout"];
 
     std::transform(secureBoot.begin(), secureBoot.end(), secureBoot.begin(), ::tolower);
     AstraSecureBootVersion secureBootVersion = secureBoot == "gen2" ? ASTRA_SECURE_BOOT_V2 : ASTRA_SECURE_BOOT_V3;
@@ -132,11 +162,11 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
 
     switch (flashImageType) {
         case FLASH_IMAGE_TYPE_SPI:
-            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, config);
+            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, std::move(manifestMaps));
         case FLASH_IMAGE_TYPE_NAND:
             throw std::invalid_argument("NAND FlashImage not supported");
         case FLASH_IMAGE_TYPE_EMMC:
-            return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, config);
+            return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, std::move(manifestMaps));
         default:
             throw std::invalid_argument("Unknown FlashImageType");
     }

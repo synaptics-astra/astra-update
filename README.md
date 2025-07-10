@@ -210,7 +210,7 @@ The boot image contains the unique id, SoC and board information, memory layout,
 Example boot image ``manifest.yaml``:
 
 ```yaml
-    id: da48b402-04e9-11f0-a78d-00155d2dc74c
+    id: 9930c714-375e-11f0-b558-0242ac110002
     chip: sl1680
     board: rdk
     secure_boot: genx
@@ -220,7 +220,7 @@ Example boot image ``manifest.yaml``:
     uenv_support: true
     memory_layout: 4gb
     uboot: suboot
-    uboot_version: "U-Boot 2019.10.202503261618_202503261956-gef520b048c-dirty (Mar 24 2025 - 16:56:36 +0000)"
+    uboot_version: "U-Boot 2019.10.202505221539_202505221945-g1581c16241-dirty (May 21 2025 - 15:54:17 +0000)"
 ```
 
 The ``manifest.yaml`` file provided with an eMMC image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The other fields provide additional information about the update image. If no ``manifest.yaml`` is provide with the update image, then the tool can determine which boot image to use based on the command line parameters or the characteristics of the update image.
@@ -228,7 +228,7 @@ The ``manifest.yaml`` file provided with an eMMC image specifies which boot imag
 Example eMMCimg ``manifest.yaml``:
 
 ```yaml
-    boot_image: da48b402-04e9-11f0-a78d-00155d2dc74c
+    boot_image: 930c714-375e-11f0-b558-0242ac110002
     image_type: emmc
     chip: sl1680
     board: rdk
@@ -240,9 +240,52 @@ The ``manifest.yaml`` file provided with a SPI image specifies which boot image 
 Example SPI ``manifest.yaml``:
 
 ```yaml
-    boot_image: da48b402-04e9-11f0-a78d-00155d2dc74c
+    boot_image: 9930c714-375e-11f0-b558-0242ac110002
     image_type: spi
     chip: sl1680
     board: rdk
     image_file: u-boot-astra-v1.1.1.sl1680.rdk.spi.bin
+```
+SPI ``manifest.yaml`` files also support listing multiple SPI images in maps. This is useful for flashing multiple SPI images at once. The ``images`` map contains
+a section per file. The section title is the file name and subsequent properties are the properties used for writing the file to the SPI flash.
+
+Example SPI ``manifest.yaml`` using image maps:
+
+```yaml
+    boot_image: 9930c714-375e-11f0-b558-0242ac110002
+    image_type: spi
+    chip: sl1680
+    board: rdk
+
+    images:
+        u-boot-astra-v1.1.1.sl1680.rdk.spi.bin:
+```
+Example SPI ``manifest.yaml`` for Writing a Linux boot image:
+
+```yaml
+    boot_image: 9930c714-375e-11f0-b558-0242ac110002
+    image_type: spi
+    chip: sl1680
+    board: rdk
+
+    images:
+        spi_suboot.bin:
+            read_address: 0x10000000
+            write_first_copy_address: 0xf0000000
+            write_second_copy_address: 0xf0200000
+            write_length: 0x1f0000
+            erase_first_start_address: 0xf0000000
+            erase_first_length: 0xf01fffff
+            erase_second_start_address: 0xf0200000
+            erase_second_length: 0xf03fffff
+
+        boot.subimg:
+            read_address: 0x10000000
+            write_first_copy_address: 0xf0400000
+            write_second_copy_address: 0xf1200000
+            write_length: 0xd0c990
+            erase_first_start_address: 0xf0400000
+            erase_first_length: 0xf11fffff
+            erase_second_start_address: 0xf1200000
+            erase_second_length: 0xf1ffffff
 ```
