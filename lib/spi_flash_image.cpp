@@ -116,8 +116,9 @@ int SpiFlashImage::Load()
             + " " + imageConfig.writeLength + "; ";
     }
 
-    m_flashCommand += m_resetCommand;
-    m_resetWhenComplete = true;
+    if (m_resetWhenComplete) {
+        m_flashCommand += m_resetCommand;
+    }
 
     return ret;
 }

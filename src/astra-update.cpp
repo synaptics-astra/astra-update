@@ -120,6 +120,7 @@ int main(int argc, char* argv[])
         ("u,usb-debug", "Enable USB debug logging", cxxopts::value<bool>()->default_value("false"))
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
+        ("r,reset", "Reset the device after a successful update", cxxopts::value<bool>()->default_value("true"))
         ("v,version", "Print version");
 
     cxxopts::ParseResult result;
@@ -182,6 +183,9 @@ int main(int argc, char* argv[])
     }
     if (result.count("memory-layout")) {
         config["memory_layout"] = result["memory-layout"].as<std::string>();
+    }
+    if (result.count("reset")) {
+        config["reset"] = result["reset"].as<bool>() ? "true" : "false";
     }
 
     // DynamicProgress to manage multiple progress bars

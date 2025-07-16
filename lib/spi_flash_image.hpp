@@ -10,8 +10,8 @@ class SpiFlashImage : public FlashImage
 public:
     SpiFlashImage(std::string imagePath, std::string bootImage, std::string chipName,
             std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout,
-            std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps) : FlashImage(FLASH_IMAGE_TYPE_SPI, imagePath,
-            bootImage, chipName, boardName, secureBootVersion, memoryLayout, std::move(manifestMaps))
+            bool resetWhenComplete, std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps) : FlashImage(FLASH_IMAGE_TYPE_SPI, imagePath,
+            bootImage, chipName, boardName, secureBootVersion, memoryLayout, resetWhenComplete, std::move(manifestMaps))
     {}
     virtual ~SpiFlashImage()
     {}

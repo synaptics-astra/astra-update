@@ -160,13 +160,18 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
         }
     }
 
+    bool resetWhenComplete = true;
+    if (configMap.find("reset") != configMap.end()) {
+        resetWhenComplete = configMap["reset"] == "true";
+    }
+
     switch (flashImageType) {
         case FLASH_IMAGE_TYPE_SPI:
-            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, std::move(manifestMaps));
+            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, resetWhenComplete, std::move(manifestMaps));
         case FLASH_IMAGE_TYPE_NAND:
             throw std::invalid_argument("NAND FlashImage not supported");
         case FLASH_IMAGE_TYPE_EMMC:
-            return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, std::move(manifestMaps));
+            return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, resetWhenComplete, std::move(manifestMaps));
         default:
             throw std::invalid_argument("Unknown FlashImageType");
     }

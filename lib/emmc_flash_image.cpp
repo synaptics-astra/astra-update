@@ -23,8 +23,10 @@ int EmmcFlashImage::Load()
 
     if (std::filesystem::exists(m_imagePath) && std::filesystem::is_directory(m_imagePath)) {
         std::string directoryName = std::filesystem::path(m_imagePath).filename().string();
-        m_flashCommand = "l2emmc " + directoryName + m_resetCommand;
-        m_resetWhenComplete = true;
+        m_flashCommand = "l2emmc " + directoryName;
+        if (m_resetWhenComplete) {
+            m_flashCommand += m_resetCommand;
+        }
         for (const auto& entry : std::filesystem::directory_iterator(m_imagePath)) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Found file: " << entry.path() << endLog;
             std::string filename = entry.path().filename().string();
