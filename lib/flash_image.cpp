@@ -162,7 +162,7 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
 
     bool resetWhenComplete = true;
     if (configMap.find("reset") != configMap.end()) {
-        resetWhenComplete = configMap["reset"] == "true";
+        resetWhenComplete = configMap["reset"] == "enable";
     }
 
     switch (flashImageType) {
