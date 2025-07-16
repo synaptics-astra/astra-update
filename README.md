@@ -105,6 +105,7 @@ These command line parameters describe the update image. If the image contains a
 * -t, --image-type arg - the type of the update image (eMMC, SPI, NAND).
 * -s, --secure-boot arg - the version of secure boot required for this update image.
 * -m, --memory-layout arg - the memory layout of the update image.
+* -r, --disable-reset - Do not reset the device after a successful update.
 
 ### Running on Windows
 
@@ -233,6 +234,7 @@ Example eMMCimg ``manifest.yaml``:
     chip: sl1680
     board: rdk
     memory_layout: 4gb
+    reset: enable
 ```
 
 The ``manifest.yaml`` file provided with a SPI image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The ``image_file`` parameter identifies the name of the image file, since SPI images to not have a specific naming convention. The other fields provide additional information about the update image. If no ``manifest.yaml`` is provide with the update image, then the tool can determine which boot image to use based on the command line parameters.
@@ -245,6 +247,7 @@ Example SPI ``manifest.yaml``:
     chip: sl1680
     board: rdk
     image_file: u-boot-astra-v1.1.1.sl1680.rdk.spi.bin
+    reset: enable
 ```
 SPI ``manifest.yaml`` files also support listing multiple SPI images in maps. This is useful for flashing multiple SPI images at once. The ``images`` map contains
 a section per file. The section title is the file name and subsequent properties are the properties used for writing the file to the SPI flash.
@@ -256,6 +259,7 @@ Example SPI ``manifest.yaml`` using image maps:
     image_type: spi
     chip: sl1680
     board: rdk
+    reset: enable
 
     images:
         u-boot-astra-v1.1.1.sl1680.rdk.spi.bin:
@@ -267,6 +271,7 @@ Example SPI ``manifest.yaml`` for Writing a Linux boot image:
     image_type: spi
     chip: sl1680
     board: rdk
+    reset: enable
 
     images:
         spi_suboot.bin:

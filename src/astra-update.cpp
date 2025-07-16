@@ -16,7 +16,7 @@
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
-const std::string astraUpdateVersion = "1.0.3";
+const std::string astraUpdateVersion = "1.0.4";
 
 // Define a struct to hold the two strings
 struct DeviceImageKey {
@@ -120,6 +120,7 @@ int main(int argc, char* argv[])
         ("u,usb-debug", "Enable USB debug logging", cxxopts::value<bool>()->default_value("false"))
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
+        ("r,disable-reset", "Reset the device after a successful update", cxxopts::value<bool>()->default_value("false"))
         ("v,version", "Print version");
 
     cxxopts::ParseResult result;
@@ -182,6 +183,9 @@ int main(int argc, char* argv[])
     }
     if (result.count("memory-layout")) {
         config["memory_layout"] = result["memory-layout"].as<std::string>();
+    }
+    if (result.count("disable-reset")) {
+        config["reset"] = result["disable-reset"].as<bool>() ? "disable" : "enable";
     }
 
     // DynamicProgress to manage multiple progress bars

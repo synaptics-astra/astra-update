@@ -21,9 +21,9 @@ class FlashImage
 {
 public:
     FlashImage(FlashImageType flashImageType, std::string imagePath, std::string bootImageId, std::string chipName,
-        std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout,
+        std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout, bool resetWhenComplete,
         std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps) : m_flashImageType{flashImageType}, m_imagePath{imagePath}, m_bootImageId{bootImageId},
-        m_chipName{chipName}, m_boardName{boardName}, m_secureBootVersion{secureBootVersion}, m_memoryLayout{memoryLayout}, m_manifestMaps{std::move(manifestMaps)}
+        m_chipName{chipName}, m_boardName{boardName}, m_secureBootVersion{secureBootVersion}, m_memoryLayout{memoryLayout}, m_resetWhenComplete{resetWhenComplete}, m_manifestMaps{std::move(manifestMaps)}
     {}
     virtual ~FlashImage()
     {}
@@ -55,7 +55,7 @@ protected:
     std::string m_flashCommand;
     std::string m_finalImage;
     std::unique_ptr<std::vector<std::map<std::string, std::string>>> m_manifestMaps;
-    bool m_resetWhenComplete = false;
+    bool m_resetWhenComplete = true;
     const std::string m_resetCommand = "; sleep 1; reset"; // sleep before resetting to let console messages be sent to the host
 };
 
