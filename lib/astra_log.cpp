@@ -115,7 +115,7 @@ void AstraLogStore::Open(const std::string &logPath, AstraLogLevel minLogLevel) 
     if (logPath == "" || logPath == "stdout") {
         m_logStream = std::make_unique<std::ostream>(std::cout.rdbuf());
     } else {
-        m_logFile.open(logPath, std::ios::out | std::ios::trunc);
+        m_logFile.open(logPath, std::ios::out | std::ios::app);
         if (!m_logFile.is_open()) {
             throw std::runtime_error("Failed to open log file");
         }
