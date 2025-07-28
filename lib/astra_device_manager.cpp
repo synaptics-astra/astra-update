@@ -47,6 +47,8 @@ public:
         AstraLogStore::getInstance().Open(m_modifiedLogPath, minLogLevel);
 
         ASTRA_LOG;
+
+        log(ASTRA_LOG_LEVEL_INFO) << "astra-update v" << AstraDeviceManager::GetVersion() << endLog;
     }
 
     void Update(std::shared_ptr<FlashImage> flashImage, std::string bootImagesPath)

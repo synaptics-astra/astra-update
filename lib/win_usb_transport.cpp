@@ -55,6 +55,7 @@ void WinUSBTransport::Shutdown()
                 m_hotplugThread.join();
             }
             DestroyWindow(m_hWnd);
+            UnregisterClass(TEXT("AstraDeviceManager"), GetModuleHandle(nullptr));
             m_hWnd = nullptr;
         }
 
