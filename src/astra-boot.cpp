@@ -143,6 +143,12 @@ int main(int argc, char* argv[])
         return 0;
     }
 
+    if (!result.count("boot-image")) {
+        std::cerr << "Error: Missing required positional argument: boot-image" << std::endl;
+        std::cout << options.help() << std::endl;
+        return -1;
+    }
+
     std::string bootImagePath = result["boot-image"].as<std::string>();
     std::string logFilePath = result["log"].as<std::string>();
     std::string tempDir = result["temp-dir"].as<std::string>();
