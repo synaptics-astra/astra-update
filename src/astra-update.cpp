@@ -117,6 +117,7 @@ int main(int argc, char* argv[])
         ("t,image-type", "Image type", cxxopts::value<std::string>())
         ("s,secure-boot", "Secure boot version", cxxopts::value<std::string>()->default_value("genx"))
         ("m,memory-layout", "Memory layout", cxxopts::value<std::string>())
+        ("d,ddr-type", "DDR type", cxxopts::value<std::string>()->default_value("not_specified"))
         ("u,usb-debug", "Enable USB debug logging", cxxopts::value<bool>()->default_value("false"))
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
@@ -184,6 +185,9 @@ int main(int argc, char* argv[])
     if (result.count("memory-layout")) {
         config["memory_layout"] = result["memory-layout"].as<std::string>();
     }
+    if (result.count("ddr-type")) {
+        config["ddr_type"] = result["ddr-type"].as<std::string>();
+    }
     if (result.count("disable-reset")) {
         config["reset"] = result["disable-reset"].as<bool>() ? "disable" : "enable";
     }
@@ -214,6 +218,7 @@ int main(int argc, char* argv[])
     std::cout << "    Image Type: " << AstraFlashImageTypeToString(flashImage->GetFlashImageType()) << std::endl;
     std::cout << "    Secure Boot: " << AstraSecureBootVersionToString(flashImage->GetSecureBootVersion()) << std::endl;
     std::cout << "    Memory Layout: " << AstraMemoryLayoutToString(flashImage->GetMemoryLayout()) << std::endl;
+    std::cout << "    DDR Type: " << AstraMemoryDDRTypeToString(flashImage->GetMemoryDDRType()) << std::endl;
     std::cout << "    Boot Image ID: " << flashImage->GetBootImageId() << "\n" << std::endl;
 
     AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);

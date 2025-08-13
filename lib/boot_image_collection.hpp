@@ -20,7 +20,8 @@ public:
     AstraBootImage &GetBootImage(std::string id) const;
 
     std::vector<std::shared_ptr<AstraBootImage>> GetBootImagesForChip(std::string chipName,
-        AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, std::string boardName) const;
+        AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType,
+        std::string boardName) const;
 
 private:
     std::string m_path;

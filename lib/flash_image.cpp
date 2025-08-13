@@ -126,6 +126,8 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
     std::string secureBoot = configMap["secure_boot"];
     std::string memoryLayoutString = configMap["memory_layout"];
 
+    std::string memoryDDRTypeString = configMap["ddr_type"];
+
     std::transform(secureBoot.begin(), secureBoot.end(), secureBoot.begin(), ::tolower);
     AstraSecureBootVersion secureBootVersion = secureBoot == "gen2" ? ASTRA_SECURE_BOOT_V2 : ASTRA_SECURE_BOOT_V3;
 
@@ -151,6 +153,23 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
         }
     }
 
+    AstraMemoryDDRType memoryDDRType = ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED;
+    std::transform(memoryDDRTypeString.begin(), memoryDDRTypeString.end(), memoryDDRTypeString.begin(), ::tolower);
+
+    if (memoryDDRTypeString == "not_specified") {
+        memoryDDRType = ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED;
+    } else if (memoryDDRTypeString == "ddr3") {
+        memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR3;
+    } else if (memoryDDRTypeString == "ddr4") {
+        memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4;
+    } else if (memoryDDRTypeString == "lpddr4") {
+        memoryDDRType = ASTRA_MEMORY_DDR_TYPE_LPDDR4;
+    } else if (memoryDDRTypeString == "lpddr4x") {
+        memoryDDRType = ASTRA_MEMORY_DDR_TYPE_LPDDR4X;
+    } else if (memoryDDRTypeString == "ddr4x16") {
+        memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
+    }
+
     if (flashImageType == FLASH_IMAGE_TYPE_UNKNOWN) {
         if (std::filesystem::exists(imagePath) && std::filesystem::is_directory(imagePath)
           && std::filesystem::exists(imagePath + "/emmc_part_list"))
@@ -167,11 +186,13 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
 
     switch (flashImageType) {
         case FLASH_IMAGE_TYPE_SPI:
-            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, resetWhenComplete, std::move(manifestMaps));
+            return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
+                        memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));
         case FLASH_IMAGE_TYPE_NAND:
             throw std::invalid_argument("NAND FlashImage not supported");
         case FLASH_IMAGE_TYPE_EMMC:
-            return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion, memoryLayout, resetWhenComplete, std::move(manifestMaps));
+            return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
+                memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));
         default:
             throw std::invalid_argument("Unknown FlashImageType");
     }
