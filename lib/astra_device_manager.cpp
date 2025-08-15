@@ -71,7 +71,7 @@ public:
             }
 
             std::vector<std::shared_ptr<AstraBootImage>> bootImages = bootImageCollection.GetBootImagesForChip(m_flashImage->GetChipName(),
-            m_flashImage->GetSecureBootVersion(), m_flashImage->GetMemoryLayout(), m_flashImage->GetBoardName());
+            m_flashImage->GetSecureBootVersion(), m_flashImage->GetMemoryLayout(), m_flashImage->GetMemoryDDRType(), m_flashImage->GetBoardName());
             if (bootImages.size() == 0) {
                 throw std::runtime_error("No boot image found for chip: " + m_flashImage->GetChipName());
             } else if (bootImages.size() > 1) {
@@ -180,6 +180,7 @@ private:
         std::string bootImageDescription = "Boot Image: " + m_bootImage->GetChipName() + " " + m_bootImage->GetBoardName() + " (" + m_bootImage->GetID() + ")\n";
         bootImageDescription += "    Secure Boot: " + AstraSecureBootVersionToString(m_bootImage->GetSecureBootVersion()) + "\n";
         bootImageDescription += "    Memory Layout: " + AstraMemoryLayoutToString(m_bootImage->GetMemoryLayout()) + "\n";
+        bootImageDescription += "    Memory DDR Type: " + AstraMemoryDDRTypeToString(m_bootImage->GetMemoryDDRType()) + "\n";
         bootImageDescription += "    U-Boot Console: " + std::string(m_bootImage->GetUbootConsole() == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") + "\n";
         bootImageDescription += "    uEnt.txt Support: " + std::string(m_bootImage->GetUEnvSupport() ? "enabled" : "disabled") + "\n";
         bootImageDescription += "    U-Boot Variant: " + std::string(m_bootImage->GetUbootVariant() == ASTRA_UBOOT_VARIANT_UBOOT ? "U-Boot" : "Synaptics U-Boot");

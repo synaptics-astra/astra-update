@@ -20,6 +20,15 @@ enum AstraMemoryLayout {
     ASTRA_MEMORY_LAYOUT_4GB = 3,
 };
 
+enum AstraMemoryDDRType {
+    ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED = 0,
+    ASTRA_MEMORY_DDR_TYPE_DDR3 = 1,
+    ASTRA_MEMORY_DDR_TYPE_DDR4 = 2,
+    ASTRA_MEMORY_DDR_TYPE_LPDDR4 = 3,
+    ASTRA_MEMORY_DDR_TYPE_LPDDR4X = 4,
+    ASTRA_MEMORY_DDR_TYPE_DDR4X16 = 5,
+};
+
 enum AstraImageType {
     ASTRA_IMAGE_TYPE_BOOT,
     ASTRA_IMAGE_TYPE_UPDATE_EMMC,
@@ -92,5 +101,23 @@ static std::string AstraMemoryLayoutToString(AstraMemoryLayout memoryLayout)
             return "4GB";
         default:
             return "unknown";
+    }
+}
+
+static std::string AstraMemoryDDRTypeToString(AstraMemoryDDRType ddrType)
+{
+    switch (ddrType) {
+        case ASTRA_MEMORY_DDR_TYPE_DDR3:
+            return "DDR3";
+        case ASTRA_MEMORY_DDR_TYPE_DDR4:
+            return "DDR4";
+        case ASTRA_MEMORY_DDR_TYPE_LPDDR4:
+            return "LPDDR4";
+        case ASTRA_MEMORY_DDR_TYPE_LPDDR4X:
+            return "LPDDR4X";
+        case ASTRA_MEMORY_DDR_TYPE_DDR4X16:
+            return "DDR4X16";
+        default:
+            return "not_specified";
     }
 }

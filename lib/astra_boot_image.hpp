@@ -38,6 +38,7 @@ public:
     AstraSecureBootVersion GetSecureBootVersion() const { return m_secureBootVersion; }
     AstraUbootConsole GetUbootConsole() const { return m_ubootConsole; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
+    AstraMemoryDDRType GetMemoryDDRType() const { return m_memoryDDRType; }
     const std::vector<Image>& GetImages() const { return m_images; }
     AstraUbootVariant GetUbootVariant() const { return m_ubootVariant; }
     const std::string GetFinalBootImage() const { return m_finalBootImage; }
@@ -54,6 +55,7 @@ private:
     AstraSecureBootVersion m_secureBootVersion;
     AstraUbootConsole m_ubootConsole;
     AstraMemoryLayout m_memoryLayout;
+    AstraMemoryDDRType m_memoryDDRType;
     uint16_t m_vendorId;
     uint16_t m_productId;
     AstraUbootVariant m_ubootVariant;

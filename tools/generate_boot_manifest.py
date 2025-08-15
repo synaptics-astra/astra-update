@@ -17,7 +17,7 @@ def extract_uboot_version(file_path):
     try:
         result = subprocess.run(['strings', file_path], capture_output=True, text=True, check=True)
         for line in result.stdout.splitlines():
-            match = re.search(r'U-Boot\s+\d{4}\.\d{2}(?:-[\w\-]+)?\s+\([A-Za-z]{3}\s+\d{1,2}\s+\d{4}\s+-\s+\d{2}:\d{2}:\d{2}\s+\+\d{4}\)', line)
+            match = re.search(r'^U-Boot\s+\d{4}\.\d{2}(?:[._-][A-Za-z0-9._-]+)*\s+\([A-Za-z]{3}\s+\d{1,2}\s+\d{4}\s+-\s+\d{2}:\d{2}:\d{2}\s+\+\d{4}\)$', line)
             if match:
                 return match.group(0).strip()
 
@@ -28,6 +28,7 @@ def extract_uboot_version(file_path):
 def parse_sdk_config(file_path):
     secure_boot = 'gen2'
     memory_layout = None
+    ddr_type = None
     uboot = 'uboot'
     chip = None
     board = None
@@ -50,9 +51,12 @@ def parse_sdk_config(file_path):
                     match = re.search(r'CONFIG_PREBOOT_MEMORY_SIZE="(\d+GB)"', line)
                     if match:
                         memory_layout = match.group(1).lower()
+                    match = re.search(r'CONFIG_PREBOOT_DDR_TYPE="([\d\w]+)"', line)
+                    if match:
+                        ddr_type = match.group(1).lower()
     except FileNotFoundError:
         pass
-    return secure_boot, memory_layout, uboot, chip, board
+    return secure_boot, memory_layout, ddr_type, uboot, chip, board
 
 def parse_uboot_config(file_path):
     console = 'uart'
@@ -78,6 +82,7 @@ def main():
     parser.add_argument('--console')
     parser.add_argument('--uenv_support')
     parser.add_argument('--memory_layout')
+    parser.add_argument('--ddr-type')
     parser.add_argument('--uboot')
     parser.add_argument('--uboot_version', default='', help='Full U-Boot version string (quoted if it has spaces)')
     parser.add_argument('--uboot_binary', help='Path to U-Boot binary to extract version from')
@@ -95,13 +100,15 @@ def main():
 
     secure_boot = args.secure_boot
     memory_layout = args.memory_layout
+    ddr_type = args.ddr_type
     uboot = args.uboot
     chip = args.chip
     board = args.board
     if args.sdk_config:
-        sb, ml, ub, cp, bd = parse_sdk_config(args.sdk_config)
+        sb, ml, dt, ub, cp, bd = parse_sdk_config(args.sdk_config)
         secure_boot = secure_boot or sb
         memory_layout = memory_layout or ml
+        ddr_type = ddr_type or dt
         uboot = uboot or ub
         chip = chip or cp
         board = board or bd
@@ -135,6 +142,7 @@ product_id: {product_id}
 console: {console}
 uenv_support: {uenv_support}
 memory_layout: {memory_layout}
+ddr_type: {ddr_type}
 uboot: {uboot}
 uboot_version: \"{uboot_version}\"
 """
