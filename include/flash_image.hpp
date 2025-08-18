@@ -21,9 +21,9 @@ class FlashImage
 {
 public:
     FlashImage(FlashImageType flashImageType, std::string imagePath, std::string bootImageId, std::string chipName,
-        std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout, bool resetWhenComplete,
+        std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType, bool resetWhenComplete,
         std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps) : m_flashImageType{flashImageType}, m_imagePath{imagePath}, m_bootImageId{bootImageId},
-        m_chipName{chipName}, m_boardName{boardName}, m_secureBootVersion{secureBootVersion}, m_memoryLayout{memoryLayout}, m_resetWhenComplete{resetWhenComplete}, m_manifestMaps{std::move(manifestMaps)}
+        m_chipName{chipName}, m_boardName{boardName}, m_secureBootVersion{secureBootVersion}, m_memoryLayout{memoryLayout}, m_memoryDDRType{memoryDDRType}, m_resetWhenComplete{resetWhenComplete}, m_manifestMaps{std::move(manifestMaps)}
     {}
     virtual ~FlashImage()
     {}
@@ -37,6 +37,7 @@ public:
     const std::string &GetFinalImage() const { return m_finalImage; }
     AstraSecureBootVersion GetSecureBootVersion() const { return m_secureBootVersion; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
+    AstraMemoryDDRType GetMemoryDDRType() const { return m_memoryDDRType; }
     const std::vector<Image>& GetImages() const { return m_images; }
     FlashImageType GetFlashImageType() const { return m_flashImageType; }
     bool GetResetWhenComplete() const { return m_resetWhenComplete; }
@@ -50,6 +51,7 @@ protected:
     std::string m_boardName;
     AstraSecureBootVersion m_secureBootVersion;
     AstraMemoryLayout m_memoryLayout;
+    AstraMemoryDDRType m_memoryDDRType;
     std::string m_imagePath;
     std::vector<Image> m_images;
     std::string m_flashCommand;

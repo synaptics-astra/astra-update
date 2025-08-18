@@ -105,6 +105,7 @@ These command line parameters describe the update image. If the image contains a
 * -t, --image-type arg - the type of the update image (eMMC, SPI, NAND).
 * -s, --secure-boot arg - the version of secure boot required for this update image.
 * -m, --memory-layout arg - the memory layout of the update image.
+* -d, --ddr-type arg - the ddr type of the update image.
 * -r, --disable-reset - Do not reset the device after a successful update.
 
 ### Running on Windows
@@ -220,6 +221,7 @@ Example boot image ``manifest.yaml``:
     console: uart
     uenv_support: true
     memory_layout: 4gb
+    ddr_type: lpddr4x
     uboot: suboot
     uboot_version: "U-Boot 2019.10.202505221539_202505221945-g1581c16241-dirty (May 21 2025 - 15:54:17 +0000)"
 ```
@@ -234,6 +236,7 @@ Example eMMCimg ``manifest.yaml``:
     chip: sl1680
     board: rdk
     memory_layout: 4gb
+    ddr_type: lpddr4x
     reset: enable
 ```
 

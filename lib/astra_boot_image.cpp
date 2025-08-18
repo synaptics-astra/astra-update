@@ -44,6 +44,25 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             throw std::runtime_error("Invalid memory layout");
         }
 
+        m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED;
+        if (manifest["ddr_type"]) {
+            std::string memoryDDRTypeString = manifest["ddr_type"].as<std::string>();
+            std::transform(memoryDDRTypeString.begin(), memoryDDRTypeString.end(), memoryDDRTypeString.begin(), ::tolower);
+            if (memoryDDRTypeString == "ddr3") {
+                m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR3;
+            } else if (memoryDDRTypeString == "ddr4") {
+                m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4;
+            } else if (memoryDDRTypeString == "lpddr4") {
+                m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_LPDDR4;
+            } else if (memoryDDRTypeString == "lpddr4x") {
+                m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_LPDDR4X;
+            } else if (memoryDDRTypeString == "ddr4x16") {
+                m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
+            } else {
+                m_memoryDDRType = ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED;
+            }
+        }
+
         std::string ubootVariantString = manifest["uboot"].as<std::string>();
         std::transform(ubootVariantString.begin(), ubootVariantString.end(), ubootVariantString.begin(), ::tolower);
         if (ubootVariantString == "uboot") {
@@ -62,6 +81,7 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         log(ASTRA_LOG_LEVEL_INFO) << "U-Boot console: " << (m_ubootConsole == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "uEnv support: " << (m_uEnvSupport ? "true" : "false") << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Memory layout: " << memoryLayoutString << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "DDR type: " << AstraMemoryDDRTypeToString(m_memoryDDRType) << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "U-Boot variant: " << ubootVariantString << endLog;
     } catch (const YAML::BadFile& e) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Unable to open the manifest file: " << e.what() << endLog;
