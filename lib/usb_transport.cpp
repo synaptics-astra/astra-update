@@ -162,7 +162,7 @@ std::string USBTransport::ConstructUSBPath(libusb_device *device)
         }
     }
 
-    log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << portStream.str() << endLog;
+    //log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << portStream.str() << endLog;
     return portStream.str();
 }
 

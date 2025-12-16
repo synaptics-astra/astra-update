@@ -151,6 +151,8 @@ void WinUSBTransport::OnDeviceArrived()
         }
 
         if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Device: 0x" << std::hex << std::setw(4) << std::setfill('0') << desc.idVendor << " 0x" << std::setw(4) << std::setfill('0') << desc.idProduct << std::dec << " " << usbPath << endLog;
+
             // Windows calls OnDeviceArrived() when any USB device arrives, not
             // just devices with a specific vid / pid. All USB devices are enumerated
             // in this loop, including devices already in use by astra-update.
@@ -161,6 +163,9 @@ void WinUSBTransport::OnDeviceArrived()
             ret = libusb_open(device, &handle);
             if (ret == LIBUSB_ERROR_ACCESS) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported LIBUSB_ERROR_ACCESS" << endLog;
+                continue;
+            } else if (ret != 0) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported error: " << ret << endLog;
                 continue;
             }
             libusb_close(handle);
