@@ -21,6 +21,7 @@ public:
 private:
     void RunHotplugHandler();
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+    std::atomic_bool m_rescanQueued{false};
     void OnDeviceArrived();
 
     std::function<void(std::unique_ptr<USBDevice>)> m_deviceAddedCallback;

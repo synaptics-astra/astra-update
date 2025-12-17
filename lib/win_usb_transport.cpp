@@ -107,22 +107,58 @@ void WinUSBTransport::RunHotplugHandler()
     }
 }
 
+static constexpr UINT WM_APP_RESCAN = WM_APP + 1;
+
 LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    ASTRA_LOG;
+
+    if (message == WM_CREATE) {
+        auto* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
+        SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreate->lpCreateParams));
+        return 0;
+    }
+
     if (message == WM_DEVICECHANGE) {
-        PDEV_BROADCAST_HDR pHdr = reinterpret_cast<PDEV_BROADCAST_HDR>(lParam);
-        if (wParam == DBT_DEVICEARRIVAL && pHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-            WinUSBTransport* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
-            if (handler) {
-                handler->OnDeviceArrived();
+        BOOL bCallOnArrival = FALSE;
+
+        if ((wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE) && lParam) {
+            auto* pHdr = reinterpret_cast<PDEV_BROADCAST_HDR>(lParam);
+            if (pHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
+                auto* pDbi = reinterpret_cast<PDEV_BROADCAST_DEVICEINTERFACE>(lParam);
+                log(ASTRA_LOG_LEVEL_DEBUG)
+                    << (wParam == DBT_DEVICEARRIVAL ? "ARRIVAL" : "REMOVAL")
+                    << ": " << pDbi->dbcc_name << endLog;
+                bCallOnArrival = TRUE;
             }
         }
-    } else if (message == WM_CREATE) {
-        CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
-        SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreate->lpCreateParams));
+        else if (wParam == DBT_DEVNODES_CHANGED || wParam == DBT_CONFIGCHANGED) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "DEVNODES or CONFIG changed" << endLog;
+            bCallOnArrival = TRUE;
+        }
+
+        if (bCallOnArrival) {
+            auto* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+            if (handler && !handler->m_rescanQueued.exchange(true)) {
+                PostMessage(hWnd, WM_APP_RESCAN, 0, 0);
+            }
+        }
+
+        return 0;
     }
+
+    if (message == WM_APP_RESCAN) {
+        auto* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+        if (handler) {
+            handler->m_rescanQueued.store(false);
+            handler->OnDeviceArrived();
+        }
+        return 0;
+    }
+
     return DefWindowProc(hWnd, message, wParam, lParam);
 }
+
 
 void WinUSBTransport::OnDeviceArrived()
 {
