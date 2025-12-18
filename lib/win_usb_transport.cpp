@@ -128,55 +128,75 @@ void WinUSBTransport::OnDeviceArrived()
 {
     ASTRA_LOG;
 
-    libusb_device **device_list;
-    ssize_t count = libusb_get_device_list(m_ctx, &device_list);
-    if (count < 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to get device list: " << libusb_error_name(count) << endLog;
-        return;
-    }
+    bool retry = false;
 
-    for (ssize_t i = 0; i < count; ++i) {
-        libusb_device *device = device_list[i];
-        libusb_device_descriptor desc;
-        int ret = libusb_get_device_descriptor(device, &desc);
-        if (ret < 0) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to get device descriptor" << endLog;
-            continue;
+    for (int i = 0; i < 3; ++i) {
+        libusb_device **device_list;
+        ssize_t count = libusb_get_device_list(m_ctx, &device_list);
+        if (count < 0) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to get device list: " << libusb_error_name(count) << endLog;
+            return;
         }
 
-        std::string usbPath = ConstructUSBPath(device);
-        if (!IsValidPort(device, usbPath)) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Device is not on a port we are monitoring" << endLog;
-            continue;
-        }
-
-        if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
-            // Windows calls OnDeviceArrived() when any USB device arrives, not
-            // just devices with a specific vid / pid. All USB devices are enumerated
-            // in this loop, including devices already in use by astra-update.
-            // On Windows try to open the device, if we get LIBUSB_ERROR_ACCESS then
-            // we are probably already using the device. If not, close the device so
-            // USBDevice can reopen it later.
-            libusb_device_handle *handle;
-            ret = libusb_open(device, &handle);
-            if (ret == LIBUSB_ERROR_ACCESS) {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported LIBUSB_ERROR_ACCESS" << endLog;
+        for (ssize_t i = 0; i < count; ++i) {
+            libusb_device *device = device_list[i];
+            libusb_device_descriptor desc;
+            int ret = libusb_get_device_descriptor(device, &desc);
+            if (ret < 0) {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to get device descriptor" << endLog;
                 continue;
             }
-            libusb_close(handle);
 
-            std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx);
-            if (m_deviceAddedCallback) {
-                try {
-                    m_deviceAddedCallback(std::move(usbDevice));
-                } catch (const std::bad_function_call& e) {
-                    log(ASTRA_LOG_LEVEL_ERROR) << "Error: " << e.what() << endLog;
+            std::string usbPath = ConstructUSBPath(device);
+            if (!IsValidPort(device, usbPath)) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Device is not on a port we are monitoring" << endLog;
+                continue;
+            }
+
+            if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
+                // Windows calls OnDeviceArrived() when any USB device arrives, not
+                // just devices with a specific vid / pid. All USB devices are enumerated
+                // in this loop, including devices already in use by astra-update.
+                // On Windows try to open the device, if we get LIBUSB_ERROR_ACCESS then
+                // we are probably already using the device. If not, close the device so
+                // USBDevice can reopen it later.
+                libusb_device_handle *handle;
+                ret = libusb_open(device, &handle);
+                if (ret == LIBUSB_ERROR_ACCESS) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported LIBUSB_ERROR_ACCESS" << endLog;
+                    continue;
+                } else if (ret == LIBUSB_ERROR_NO_DEVICE || ret == LIBUSB_ERROR_NOT_SUPPORTED) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " no longer present" << endLog;
+                    retry = true;
+                    break;
+                } else if (ret != 0) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported error: " << ret << endLog;
+                    continue;
                 }
-            } else {
-                log(ASTRA_LOG_LEVEL_ERROR) << "No device added callback" << endLog;
+
+                libusb_close(handle);
+
+                retry = false;
+                std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx);
+                if (m_deviceAddedCallback) {
+                    try {
+                        m_deviceAddedCallback(std::move(usbDevice));
+                    } catch (const std::bad_function_call& e) {
+                        log(ASTRA_LOG_LEVEL_ERROR) << "Error: " << e.what() << endLog;
+                    }
+                } else {
+                    log(ASTRA_LOG_LEVEL_ERROR) << "No device added callback" << endLog;
+                }
             }
         }
-    }
 
-    libusb_free_device_list(device_list, 1);
+        libusb_free_device_list(device_list, 1);
+
+        if (retry) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Retrying!" << endLog;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+            break;
+        }
+    }
 }

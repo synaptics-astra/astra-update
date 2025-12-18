@@ -12,7 +12,7 @@
 #include "flash_image.hpp"
 #include "astra_log.hpp"
 
-#define ASTRA_DEVICE_MANAGER_VERSION "1.0.5"
+#define ASTRA_DEVICE_MANAGER_VERSION "1.0.5.3-error-retry"
 
 enum AstraDeviceManagerStatus {
     ASTRA_DEVICE_MANAGER_STATUS_START,
