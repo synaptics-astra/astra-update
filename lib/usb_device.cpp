@@ -208,12 +208,12 @@ int USBDevice::EnableInterrupts()
     m_callbackThreadRunning.store(true);
     m_callbackThread = std::thread(&USBDevice::CallbackWorkerThread, this);
 
+    m_running.store(true);
     int ret = libusb_submit_transfer(m_inputInterruptXfer);
     if (ret < 0) {
+        m_running.store(false);
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
     }
-
-    m_running.store(true);
 
     return ret;
 }
