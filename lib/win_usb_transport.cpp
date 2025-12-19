@@ -130,7 +130,7 @@ void WinUSBTransport::OnDeviceArrived()
 
     bool retry = false;
 
-    for (int i = 0; i < 3; ++i) {
+    for (int retryCount = 0; retryCount < 3; ++retryCount) {
         libusb_device **device_list;
         ssize_t count = libusb_get_device_list(m_ctx, &device_list);
         if (count < 0) {

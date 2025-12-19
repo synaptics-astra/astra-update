@@ -212,6 +212,12 @@ int USBDevice::EnableInterrupts()
     int ret = libusb_submit_transfer(m_inputInterruptXfer);
     if (ret < 0) {
         m_running.store(false);
+        // Stop the callback thread since we failed to start
+        m_callbackThreadRunning.store(false);
+        m_callbackQueueCV.notify_all();
+        if (m_callbackThread.joinable()) {
+            m_callbackThread.join();
+        }
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
     }
 

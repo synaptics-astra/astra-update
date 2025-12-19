@@ -13,7 +13,7 @@
 
 class WinUSBTransport : public USBTransport {
 public:
-    WinUSBTransport(bool usbDebug) : USBTransport(usbDebug) {};
+    WinUSBTransport(bool usbDebug) : USBTransport(usbDebug), m_hWnd(nullptr), m_hDevNotify(nullptr) {};
     ~WinUSBTransport() override;
     int Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback) override;
     void Shutdown() override;
