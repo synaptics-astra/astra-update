@@ -9,8 +9,9 @@
 #include <functional>
 #include <condition_variable>
 #include <mutex>
+#include <queue>
+#include <vector>
 #include <libusb-1.0/libusb.h>
-#include <mutex>
 
 #include "device.hpp"
 
@@ -71,6 +72,19 @@ private:
     int m_bulkTransferTimeout;
 
     std::function<void(USBEvent event, uint8_t *buf, size_t size)> m_usbEventCallback;
+
+    // Async callback processing
+    struct CallbackEvent {
+        USBEvent event;
+        std::vector<uint8_t> data;
+    };
+    std::queue<CallbackEvent> m_callbackQueue;
+    std::mutex m_callbackQueueMutex;
+    std::condition_variable m_callbackQueueCV;
+    std::thread m_callbackThread;
+    std::atomic<bool> m_callbackThreadRunning{false};
+
+    void CallbackWorkerThread();
 
     static void LIBUSB_CALL HandleTransfer(struct libusb_transfer *transfer);
 };

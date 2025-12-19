@@ -204,6 +204,10 @@ int USBDevice::EnableInterrupts()
 {
     ASTRA_LOG;
 
+    // Start callback worker thread
+    m_callbackThreadRunning.store(true);
+    m_callbackThread = std::thread(&USBDevice::CallbackWorkerThread, this);
+
     int ret = libusb_submit_transfer(m_inputInterruptXfer);
     if (ret < 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
@@ -214,11 +218,51 @@ int USBDevice::EnableInterrupts()
     return ret;
 }
 
+void USBDevice::CallbackWorkerThread()
+{
+    ASTRA_LOG;
+
+    while (m_callbackThreadRunning.load()) {
+        CallbackEvent event;
+        {
+            std::unique_lock<std::mutex> lock(m_callbackQueueMutex);
+            m_callbackQueueCV.wait(lock, [this] {
+                return !m_callbackQueue.empty() || !m_callbackThreadRunning.load();
+            });
+
+            if (!m_callbackThreadRunning.load() && m_callbackQueue.empty()) {
+                break;
+            }
+
+            if (!m_callbackQueue.empty()) {
+                event = std::move(m_callbackQueue.front());
+                m_callbackQueue.pop();
+            } else {
+                continue;
+            }
+        }
+
+        // Call the callback outside the lock to avoid blocking the queue
+        if (m_usbEventCallback) {
+            m_usbEventCallback(event.event, event.data.empty() ? nullptr : event.data.data(), event.data.size());
+        }
+    }
+}
+
 void USBDevice::Close()
 {
     ASTRA_LOG;
 
     m_writeCompleteCV.notify_all();
+
+    // Stop callback thread
+    if (m_callbackThreadRunning.exchange(false)) {
+        m_callbackQueueCV.notify_all();
+        if (m_callbackThread.joinable()) {
+            m_callbackThread.join();
+        }
+    }
+
     std::lock_guard<std::mutex> lock(m_closeMutex);
     if (!m_shutdown.exchange(true))
     {
@@ -364,6 +408,17 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
 
     bool resubmit = false;
 
+    auto queueEvent = [device](USBEvent event, uint8_t *buf, size_t size) {
+        CallbackEvent cbEvent;
+        cbEvent.event = event;
+        if (buf && size > 0) {
+            cbEvent.data.assign(buf, buf + size);
+        }
+        std::lock_guard<std::mutex> lock(device->m_callbackQueueMutex);
+        device->m_callbackQueue.push(std::move(cbEvent));
+        device->m_callbackQueueCV.notify_one();
+    };
+
     if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
         if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK) {
             if (transfer->endpoint == device->m_bulkOutEndpoint) {
@@ -373,18 +428,18 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
             }
         } else if (transfer->type == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
             if (transfer->endpoint == device->m_interruptInEndpoint) {
-                device->m_usbEventCallback(USB_DEVICE_EVENT_INTERRUPT, transfer->buffer, transfer->actual_length);
+                queueEvent(USB_DEVICE_EVENT_INTERRUPT, transfer->buffer, transfer->actual_length);
             }
             resubmit = true;
         }
     } else if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
         device->m_running.store(false);
         log(ASTRA_LOG_LEVEL_INFO) << "Device is no longer there during transfer: " << libusb_error_name(transfer->status) << endLog;
-        device->m_usbEventCallback(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
+        queueEvent(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
         device->m_running.store(false);
         log(ASTRA_LOG_LEVEL_DEBUG) << "Input transfer cancelled" << endLog;
-        device->m_usbEventCallback(USB_DEVICE_EVENT_TRANSFER_CANCELED, nullptr, 0);
+        queueEvent(USB_DEVICE_EVENT_TRANSFER_CANCELED, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_STALL) {
         log(ASTRA_LOG_LEVEL_WARNING) << "Endpoint stalled, clearing halt" << endLog;
         int ret = libusb_clear_halt(device->m_handle, transfer->endpoint);
@@ -392,7 +447,7 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
             log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint: " << libusb_error_name(ret) << endLog;
             if (ret == LIBUSB_ERROR_NO_DEVICE) {
                 device->m_running.store(false);
-                device->m_usbEventCallback(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
+                queueEvent(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
             } else {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint: " << libusb_error_name(ret) << endLog;
             }
@@ -402,7 +457,7 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
         }
     } else {
         log(ASTRA_LOG_LEVEL_ERROR) << "Transfer failed: " << libusb_error_name(transfer->status) << endLog;
-        device->m_usbEventCallback(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
+        queueEvent(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
     }
 
     if (resubmit && device->m_running.load()) {
@@ -410,7 +465,7 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
         int ret = libusb_submit_transfer(transfer);
         if (ret < 0) {
             log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit transfer: " << libusb_error_name(ret) << endLog;
-            device->m_usbEventCallback(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
+            queueEvent(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
         }
     }
 }
