@@ -22,9 +22,16 @@ private:
     void RunHotplugHandler();
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
     void OnDeviceArrived();
+    void DeviceEnumerationWorker();
+    void ProcessPendingDevices();
 
     std::function<void(std::unique_ptr<USBDevice>)> m_deviceAddedCallback;
     HWND m_hWnd;
     HDEVNOTIFY m_hDevNotify;
     std::thread m_hotplugThread;
+    std::thread m_deviceEnumerationThread;
+    std::atomic<bool> m_enumerationThreadRunning{false};
+    std::atomic<bool> m_hasPendingDevices{false};
+    std::mutex m_pendingDevicesMutex;
+    std::condition_variable m_pendingDevicesCV;
 };

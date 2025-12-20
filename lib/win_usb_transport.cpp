@@ -36,6 +36,10 @@ int WinUSBTransport::Init(uint16_t vendorId, uint16_t productId, const std::stri
 
     m_running.store(true);
 
+    // Start device enumeration worker thread
+    m_enumerationThreadRunning.store(true);
+    m_deviceEnumerationThread = std::thread(&WinUSBTransport::DeviceEnumerationWorker, this);
+
     m_hotplugThread = std::thread(&WinUSBTransport::RunHotplugHandler, this);
 
     StartDeviceMonitor();
@@ -49,6 +53,14 @@ void WinUSBTransport::Shutdown()
 
     std::lock_guard<std::mutex> lock(m_shutdownMutex);
     if (m_running.exchange(false)) {
+        // Stop device enumeration worker thread
+        if (m_enumerationThreadRunning.exchange(false)) {
+            m_pendingDevicesCV.notify_all();
+            if (m_deviceEnumerationThread.joinable()) {
+                m_deviceEnumerationThread.join();
+            }
+        }
+
         if (m_hWnd) {
             PostMessage(m_hWnd, WM_QUIT, 0, 0);
             if (m_hotplugThread.joinable()) {
@@ -125,6 +137,39 @@ LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam
 }
 
 void WinUSBTransport::OnDeviceArrived()
+{
+    ASTRA_LOG;
+
+    // Defer device enumeration to avoid blocking the hotplug thread
+    // and minimize lock contention with libusb event handling
+    m_hasPendingDevices.store(true);
+    m_pendingDevicesCV.notify_one();
+}
+
+void WinUSBTransport::DeviceEnumerationWorker()
+{
+    ASTRA_LOG;
+
+    while (m_enumerationThreadRunning.load()) {
+        {
+            std::unique_lock<std::mutex> lock(m_pendingDevicesMutex);
+            m_pendingDevicesCV.wait(lock, [this] {
+                return m_hasPendingDevices.load() || !m_enumerationThreadRunning.load();
+            });
+
+            if (!m_enumerationThreadRunning.load()) {
+                break;
+            }
+        }
+
+        // Process devices outside the lock
+        if (m_hasPendingDevices.exchange(false)) {
+            ProcessPendingDevices();
+        }
+    }
+}
+
+void WinUSBTransport::ProcessPendingDevices()
 {
     ASTRA_LOG;
 
