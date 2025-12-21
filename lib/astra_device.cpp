@@ -536,7 +536,7 @@ private:
 
             log(ASTRA_LOG_LEVEL_DEBUG) << "after m_imageRequestCV.wait()" << endLog;
             if (!m_running.load()) {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Image Request received when AstraDevice is not running" << endLog;
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Image Request received when AstraDevice is not running: " << m_requestedImageName << endLog;
                 return 0;
             }
 

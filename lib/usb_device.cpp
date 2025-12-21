@@ -434,6 +434,7 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
             }
         } else if (transfer->type == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
             if (transfer->endpoint == device->m_interruptInEndpoint) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Received Interrupt" << endLog;
                 queueEvent(USB_DEVICE_EVENT_INTERRUPT, transfer->buffer, transfer->actual_length);
             }
             resubmit = true;
