@@ -122,9 +122,15 @@ void WinUSBTransport::RunHotplugHandler()
 LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == WM_DEVICECHANGE) {
-        PDEV_BROADCAST_HDR pHdr = reinterpret_cast<PDEV_BROADCAST_HDR>(lParam);
-        if (wParam == DBT_DEVICEARRIVAL && pHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
-            WinUSBTransport* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+        WinUSBTransport* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+
+        if (wParam == DBT_DEVICEARRIVAL) {
+            PDEV_BROADCAST_HDR pHdr = reinterpret_cast<PDEV_BROADCAST_HDR>(lParam);
+            if (pHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
+                PDEV_BROADCAST_DEVICEINTERFACE pDevInf = reinterpret_cast<PDEV_BROADCAST_DEVICEINTERFACE>(pHdr);
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Device Arrived: " << pDevInf->dbcc_name << endLog;
+            }
+        } else if (wParam == DBT_DEVNODES_CHANGED) {
             if (handler) {
                 handler->OnDeviceArrived();
             }
