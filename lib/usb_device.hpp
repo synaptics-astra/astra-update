@@ -84,6 +84,13 @@ private:
     std::thread m_callbackThread;
     std::atomic<bool> m_callbackThreadRunning{false};
 
+    // Transfer cancellation tracking
+    std::atomic<bool> m_inputInterruptCancelled{false};
+    std::atomic<bool> m_outputInterruptCancelled{false};
+    std::atomic<bool> m_bulkWriteCancelled{false};
+    std::mutex m_cancellationMutex;
+    std::condition_variable m_cancellationCV;
+
     void CallbackWorkerThread();
 
     static void LIBUSB_CALL HandleTransfer(struct libusb_transfer *transfer);

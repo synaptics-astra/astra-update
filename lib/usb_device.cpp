@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <iomanip>
 #include <cstring>
+#include <chrono>
 
 #include "usb_device.hpp"
 #include "astra_log.hpp"
@@ -279,34 +280,49 @@ void USBDevice::Close()
     {
         m_running.store(false);
 
-        // Cancel all transfers and track if any were actually in-flight
-        bool needsEventProcessing = false;
+        // Cancel all transfers and track which ones need to complete
+        bool waitForInputInterrupt = false;
+        bool waitForOutputInterrupt = false;
+        bool waitForBulkWrite = false;
 
         if (m_inputInterruptXfer) {
             int ret = libusb_cancel_transfer(m_inputInterruptXfer);
             if (ret == 0) {
-                needsEventProcessing = true;
+                waitForInputInterrupt = true;
             }
         }
 
         if (m_outputInterruptXfer) {
             int ret = libusb_cancel_transfer(m_outputInterruptXfer);
             if (ret == 0) {
-                needsEventProcessing = true;
+                waitForOutputInterrupt = true;
             }
         }
 
         if (m_bulkWriteXfer) {
             int ret = libusb_cancel_transfer(m_bulkWriteXfer);
             if (ret == 0) {
-                needsEventProcessing = true;
+                waitForBulkWrite = true;
             }
         }
 
-        // Only wait for events if we actually cancelled something
-        if (needsEventProcessing) {
-            struct timeval tv = { 0, 100000 };  // 100ms
-            libusb_handle_events_timeout_completed(m_ctx, &tv, nullptr);
+        // Wait for cancellation callbacks to complete (with timeout for safety)
+        // DeviceMonitorThread will process these callbacks and notify us
+        if (waitForInputInterrupt || waitForOutputInterrupt || waitForBulkWrite) {
+            std::unique_lock<std::mutex> lock(m_cancellationMutex);
+            m_cancellationCV.wait_for(lock, std::chrono::milliseconds(500), [&]() {
+                bool allCancelled = true;
+                if (waitForInputInterrupt && !m_inputInterruptCancelled.load()) {
+                    allCancelled = false;
+                }
+                if (waitForOutputInterrupt && !m_outputInterruptCancelled.load()) {
+                    allCancelled = false;
+                }
+                if (waitForBulkWrite && !m_bulkWriteCancelled.load()) {
+                    allCancelled = false;
+                }
+                return allCancelled;
+            });
         }
 
         // Free transfers
@@ -470,10 +486,46 @@ void USBDevice::HandleTransfer(struct libusb_transfer *transfer)
     } else if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
         device->m_running.store(false);
         log(ASTRA_LOG_LEVEL_INFO) << "Device is no longer there during transfer: " << libusb_error_name(transfer->status) << endLog;
+
+        // Set cancellation flag so Close() doesn't timeout waiting
+        {
+            std::lock_guard<std::mutex> lock(device->m_cancellationMutex);
+            if (transfer->type == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
+                if (transfer->endpoint == device->m_interruptInEndpoint) {
+                    device->m_inputInterruptCancelled.store(true);
+                } else if (transfer->endpoint == device->m_interruptOutEndpoint) {
+                    device->m_outputInterruptCancelled.store(true);
+                }
+            } else if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK) {
+                if (transfer->endpoint == device->m_bulkOutEndpoint) {
+                    device->m_bulkWriteCancelled.store(true);
+                }
+            }
+        }
+        device->m_cancellationCV.notify_one();
+
         queueEvent(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
         device->m_running.store(false);
-        log(ASTRA_LOG_LEVEL_DEBUG) << "Input transfer cancelled" << endLog;
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Transfer cancelled" << endLog;
+
+        // Set cancellation flag for the specific transfer and notify
+        {
+            std::lock_guard<std::mutex> lock(device->m_cancellationMutex);
+            if (transfer->type == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
+                if (transfer->endpoint == device->m_interruptInEndpoint) {
+                    device->m_inputInterruptCancelled.store(true);
+                } else if (transfer->endpoint == device->m_interruptOutEndpoint) {
+                    device->m_outputInterruptCancelled.store(true);
+                }
+            } else if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK) {
+                if (transfer->endpoint == device->m_bulkOutEndpoint) {
+                    device->m_bulkWriteCancelled.store(true);
+                }
+            }
+        }
+        device->m_cancellationCV.notify_one();
+
         queueEvent(USB_DEVICE_EVENT_TRANSFER_CANCELED, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_STALL) {
         log(ASTRA_LOG_LEVEL_WARNING) << "Endpoint stalled, clearing halt" << endLog;
