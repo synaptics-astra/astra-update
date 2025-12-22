@@ -122,6 +122,7 @@ int main(int argc, char* argv[])
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
         ("r,disable-reset", "Reset the device after a successful update", cxxopts::value<bool>()->default_value("false"))
+        ("e,exit-on-error", "Exit if an error occurs when running in continuous mode", cxxopts::value<bool>()->default_value("false"))
         ("v,version", "Print version");
 
     cxxopts::ParseResult result;
@@ -150,6 +151,7 @@ int main(int argc, char* argv[])
     std::string tempDir = result["temp-dir"].as<std::string>();
     bool debug = result["debug"].as<bool>();
     bool continuous = result["continuous"].as<bool>();
+    bool exitOnError = result["exit-on-error"].as<bool>();
     AstraLogLevel logLevel = debug ?  ASTRA_LOG_LEVEL_DEBUG : ASTRA_LOG_LEVEL_INFO;
     bool usbDebug = result["usb-debug"].as<bool>();
     bool simpleProgress = result["simple-progress"].as<bool>();
@@ -271,8 +273,16 @@ int main(int argc, char* argv[])
                     std::cout << "Device: " << deviceResponse.m_deviceName << " Update Complete" << std::endl;
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
                     std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: " << deviceResponse.m_message << std::endl;
+                    if (continuous && exitOnError) {
+                        running.store(false);
+                        break;
+                    }
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL) {
                     std::cout << "Device: " << deviceResponse.m_deviceName << " Update Failed: " << deviceResponse.m_message << std::endl;
+                    if (continuous && exitOnError) {
+                        running.store(false);
+                        break;
+                    }
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_START ||
                     deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS ||
                     deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE)

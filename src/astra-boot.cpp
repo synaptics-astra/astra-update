@@ -115,6 +115,7 @@ int main(int argc, char* argv[])
         ("o,boot-command", "Boot command", cxxopts::value<std::string>()->default_value(""))
         ("boot-image", "Boot Image Path", cxxopts::value<std::string>())
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
+        ("e,exit-on-error", "Exit if an error occurs when running in continuous mode", cxxopts::value<bool>()->default_value("false"))
         ("v,version", "Print version");
 
     options.parse_positional({"boot-image"});
@@ -150,6 +151,7 @@ int main(int argc, char* argv[])
     std::string tempDir = result["temp-dir"].as<std::string>();
     bool debug = result["debug"].as<bool>();
     bool continuous = result["continuous"].as<bool>();
+    bool exitOnError = result["exit-on-error"].as<bool>();
     AstraLogLevel logLevel = debug ?  ASTRA_LOG_LEVEL_DEBUG : ASTRA_LOG_LEVEL_INFO;
     bool usbDebug = result["usb-debug"].as<bool>();
     bool simpleProgress = result["simple-progress"].as<bool>();
@@ -221,6 +223,10 @@ int main(int argc, char* argv[])
                     std::cout << "Booting " << deviceResponse.m_deviceName << " is complete" << std::endl;
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
                     std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: " << deviceResponse.m_message << std::endl;
+                    if (continuous && exitOnError) {
+                        running.store(false);
+                        break;
+                    }
                 } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_START ||
                     deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS ||
                     deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE)
