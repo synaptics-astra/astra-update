@@ -203,8 +203,7 @@ void WinUSBTransport::ProcessPendingDevices()
                 // just devices with a specific vid / pid. All USB devices are enumerated
                 // in this loop, including devices already in use by astra-update.
                 // On Windows try to open the device, if we get LIBUSB_ERROR_ACCESS then
-                // we are probably already using the device. If not, close the device so
-                // USBDevice can reopen it later.
+                // we are probably already using the device.
                 libusb_device_handle *handle;
                 ret = libusb_open(device, &handle);
                 if (ret == LIBUSB_ERROR_ACCESS) {
@@ -219,10 +218,8 @@ void WinUSBTransport::ProcessPendingDevices()
                     continue;
                 }
 
-                libusb_close(handle);
-
                 retry = false;
-                std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx);
+                std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx, handle);
                 if (m_deviceAddedCallback) {
                     try {
                         m_deviceAddedCallback(std::move(usbDevice));

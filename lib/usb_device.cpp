@@ -9,13 +9,13 @@
 #include "usb_device.hpp"
 #include "astra_log.hpp"
 
-USBDevice::USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx)
+USBDevice::USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx, libusb_device_handle *handle)
 {
     ASTRA_LOG;
 
     m_device = libusb_ref_device(device);
     m_ctx = ctx;
-    m_handle = nullptr;
+    m_handle = handle;
     m_config = nullptr;
     m_running.store(false);
     m_interruptInEndpoint = 0;
@@ -47,7 +47,10 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
 {
     ASTRA_LOG;
 
-    if (m_handle) {
+    int ret = 0;
+
+    if (m_handle && m_config) {
+        log(ASTRA_LOG_LEVEL_INFO) << "USB device is already open" << endLog;
         return 0;
     }
 
@@ -57,15 +60,17 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
 
     m_usbEventCallback = usbEventCallback;
 
-    int ret = libusb_open(m_device, &m_handle);
-    if (ret < 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open USB device: " << libusb_error_name(ret) << endLog;
-        return -1;
-    }
-
     if (m_handle == nullptr) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open USB device" << endLog;
-        return -1;
+        ret = libusb_open(m_device, &m_handle);
+        if (ret < 0) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open USB device: " << libusb_error_name(ret) << endLog;
+            return -1;
+        }
+
+        if (m_handle == nullptr) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open USB device" << endLog;
+            return -1;
+        }
     }
 
     ret = libusb_get_config_descriptor(libusb_get_device(m_handle), 0, &m_config);
