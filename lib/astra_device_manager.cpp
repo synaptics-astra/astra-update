@@ -124,8 +124,6 @@ public:
     {
         ASTRA_LOG;
 
-        m_transport->Shutdown();
-
         std::lock_guard<std::mutex> lock(m_devicesMutex);
         for (auto& device : m_devices) {
             device->Close();
@@ -140,6 +138,8 @@ public:
                 log(ASTRA_LOG_LEVEL_WARNING) << "Failed to remove temp directory: " << e.what() << endLog;
             }
         }
+
+        m_transport->Shutdown();
 
         return m_failureReported;
     }
