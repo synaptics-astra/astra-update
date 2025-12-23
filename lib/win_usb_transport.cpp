@@ -121,6 +121,8 @@ void WinUSBTransport::RunHotplugHandler()
 
 LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    ASTRA_LOG;
+
     if (message == WM_DEVICECHANGE) {
         WinUSBTransport* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
