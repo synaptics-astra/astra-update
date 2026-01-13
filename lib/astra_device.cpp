@@ -374,10 +374,10 @@ private:
         } else if (event == USBDevice::USB_DEVICE_EVENT_NO_DEVICE || event == USBDevice::USB_DEVICE_EVENT_TRANSFER_CANCELED ||
             event == USBDevice::USB_DEVICE_EVENT_TRANSFER_ERROR)
         {
-            // When using SU-Boot the gen3_miniloader.bin.usb image seems to
+            // When using SU-Boot the gen3_miniloader.bin.usb image will
             // cause the device to reset and reconnect. Suppress reporting this as a failure.
             if (m_requestedImageName == "gen3_miniloader.bin.usb") {
-                log(ASTRA_LOG_LEVEL_WARNING) << "Device disconnected: after sending gen3_miniloader.bin.usb" << endLog;
+                log(ASTRA_LOG_LEVEL_INFO) << "Device disconnected: after sending gen3_miniloader.bin.usb" << endLog;
             } else {
                 // device disappeared or reported an error.
                 // If this occurred during boot or an update then report a failure.
