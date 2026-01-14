@@ -158,7 +158,7 @@ LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam
         }
     } else if (message == WM_CREATE) {
         CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
-        SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreate->lpCreateParams));
+        SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreate->lpCreateParams));;
     }
     return DefWindowProc(hWnd, message, wParam, lParam);
 }
@@ -252,6 +252,15 @@ void WinUSBTransport::ProcessPendingDevices()
             }
 
             if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
+                // Check if we've already opened this device in this process
+                {
+                    std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
+                    if (m_activeDevices.find(usbPath) != m_activeDevices.end()) {
+                        log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " already opened in this process, skipping" << endLog;
+                        continue;
+                    }
+                }
+
                 // Windows calls OnDeviceArrived() when any USB device arrives, not
                 // just devices with a specific vid / pid. All USB devices are enumerated
                 // in this loop, including devices already in use by astra-update.
@@ -273,6 +282,14 @@ void WinUSBTransport::ProcessPendingDevices()
 
                 retry = false;
                 std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx, handle);
+
+                // Add to active devices set to prevent duplicate opens
+                {
+                    std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
+                    m_activeDevices.insert(usbPath);
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Added device: " << usbPath << " to active devices set" << endLog;
+                }
+
                 if (m_deviceAddedCallback) {
                     try {
                         m_deviceAddedCallback(std::move(usbDevice));
@@ -335,5 +352,17 @@ void WinUSBTransport::UnblockDeviceEnumeration()
         } else {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Released critical section mutex" << endLog;
         }
+    }
+}
+
+void WinUSBTransport::RemoveActiveDevice(const std::string& usbPath)
+{
+    ASTRA_LOG;
+
+    std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
+    auto it = m_activeDevices.find(usbPath);
+    if (it != m_activeDevices.end()) {
+        m_activeDevices.erase(it);
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Removed device: " << usbPath << " from active devices set" << endLog;
     }
 }

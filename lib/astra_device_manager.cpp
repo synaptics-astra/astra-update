@@ -243,6 +243,7 @@ private:
             int ret = astraDevice->Boot(m_bootImage);
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to boot device" << endLog;
+                m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
                 m_transport->UnblockDeviceEnumeration();
                 ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
                 return;
@@ -253,6 +254,7 @@ private:
                 ret = astraDevice->Update(m_flashImage);
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to update device" << endLog;
+                    m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
                     m_transport->UnblockDeviceEnumeration();
                     return;
                 }
@@ -262,6 +264,7 @@ private:
             ret = astraDevice->WaitForCompletion();
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to wait for completion" << endLog;
+                m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
                 m_transport->UnblockDeviceEnumeration();
                 return;
             }
@@ -278,6 +281,9 @@ private:
             }
 
             astraDevice->Close();
+
+            // Remove device from active devices set to allow re-detection after reset
+            m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
 
             // Unblock device enumeration after boot/update completes
             m_transport->UnblockDeviceEnumeration();

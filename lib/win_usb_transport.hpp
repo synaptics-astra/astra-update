@@ -7,6 +7,8 @@
 #include <dbt.h>
 #include <thread>
 #include <memory>
+#include <set>
+#include <string>
 
 #include "usb_transport.hpp"
 #include "usb_device.hpp"
@@ -20,6 +22,7 @@ public:
 
     void BlockDeviceEnumeration() override;
     void UnblockDeviceEnumeration() override;
+    void RemoveActiveDevice(const std::string& usbPath) override;
 
 private:
     void RunHotplugHandler();
@@ -38,4 +41,7 @@ private:
     std::atomic<bool> m_hasPendingDevices{false};
     std::mutex m_pendingDevicesMutex;
     std::condition_variable m_pendingDevicesCV;
+
+    std::set<std::string> m_activeDevices;  // Track USB paths of currently opened devices
+    std::mutex m_activeDevicesMutex;
 };

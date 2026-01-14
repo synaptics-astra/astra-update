@@ -229,6 +229,11 @@ public:
         return m_deviceName;
     }
 
+    std::string GetUSBPath()
+    {
+        return m_usbDevice->GetUSBPath();
+    }
+
     AstraDeviceStatus GetDeviceStatus()
     {
         return m_status;
@@ -692,6 +697,10 @@ int AstraDevice::ReceiveFromConsole(std::string &data) {
 
 std::string AstraDevice::GetDeviceName() {
     return pImpl->GetDeviceName();
+}
+
+std::string AstraDevice::GetUSBPath() {
+    return pImpl->GetUSBPath();
 }
 
 AstraDeviceStatus AstraDevice::GetDeviceStatus() {
