@@ -557,6 +557,12 @@ private:
                     m_running.store(false);
                     m_deviceEventCV.notify_all();
                     return 0;
+                } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_START) {
+                    // Update failed to start. Device maybe in an invalid state.
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Update failed to start:" << endLog;
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
+                    return -1;
                 } else {
                     continue;
                 }
