@@ -542,10 +542,16 @@ private:
             }
 
             if (!notified) {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Timeout waiting for image request" << endLog;
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Timeout waiting for image request: device status: " << AstraDeviceStatusToString(m_status) << endLog;
                 if (m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS) {
                     SendStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Timeout during boot, press RESET while holding USB_BOOT to try again");
                     return -1;
+                } else if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                    // Update is complete, but the device has not disconnected yet.
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
+                    return 0;
                 } else {
                     continue;
                 }

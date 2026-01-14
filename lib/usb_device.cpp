@@ -203,6 +203,17 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
     libusb_fill_interrupt_transfer(m_inputInterruptXfer, m_handle, m_interruptInEndpoint,
         m_interruptInBuffer, m_interruptInSize, HandleTransfer, this, 0);
 
+    // Submit interrupt transfer immediately to avoid losing interrupts
+    // Interrupts will be queued until EnableInterrupts() starts the callback worker thread
+    m_running.store(true);
+    ret = libusb_submit_transfer(m_inputInterruptXfer);
+    if (ret < 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
+        m_running.store(false);
+        return ret;
+    }
+
+    log(ASTRA_LOG_LEVEL_DEBUG) << "Interrupt transfer submitted, interrupts will queue" << endLog;
     return 0;
 }
 
@@ -210,24 +221,14 @@ int USBDevice::EnableInterrupts()
 {
     ASTRA_LOG;
 
-    // Start callback worker thread
+    // Start callback worker thread to process queued interrupts
+    // Interrupt transfer was already submitted in Open(), so interrupts are already queuing
     m_callbackThreadRunning.store(true);
     m_callbackThread = std::thread(&USBDevice::CallbackWorkerThread, this);
 
-    m_running.store(true);
-    int ret = libusb_submit_transfer(m_inputInterruptXfer);
-    if (ret < 0) {
-        m_running.store(false);
-        // Stop the callback thread since we failed to start
-        m_callbackThreadRunning.store(false);
-        m_callbackQueueCV.notify_all();
-        if (m_callbackThread.joinable()) {
-            m_callbackThread.join();
-        }
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
-    }
+    log(ASTRA_LOG_LEVEL_DEBUG) << "Callback worker thread started, processing queued interrupts" << endLog;
 
-    return ret;
+    return 0;
 }
 
 void USBDevice::CallbackWorkerThread()
