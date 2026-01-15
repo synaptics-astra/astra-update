@@ -384,6 +384,7 @@ private:
                 // This this happened after and successful update then this is just
                 // the device rebooting so report success.
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Device disconnected: shutting down" << endLog;
+
                 if (m_status == ASTRA_DEVICE_STATUS_UPDATE_PROGRESS) {
                     m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
                 } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS) {
@@ -591,6 +592,7 @@ private:
 
                 ret = SendImage(image);
                 log(ASTRA_LOG_LEVEL_DEBUG) << "After send image: " << image->GetName() << endLog;
+
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send image" << endLog;
                     if (m_status == ASTRA_DEVICE_STATUS_BOOT_START || m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS) {

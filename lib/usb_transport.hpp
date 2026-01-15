@@ -24,6 +24,11 @@ public:
         std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback);
     virtual void Shutdown();
 
+    // Block/unblock device enumeration during critical boot sequences
+    // Default implementations are no-ops for non-Windows platforms
+    virtual void BlockDeviceEnumeration() {}
+    virtual void UnblockDeviceEnumeration() {}
+
     void StartDeviceMonitor();
 
 protected:

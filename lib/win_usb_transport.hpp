@@ -13,10 +13,13 @@
 
 class WinUSBTransport : public USBTransport {
 public:
-    WinUSBTransport(bool usbDebug) : USBTransport(usbDebug), m_hWnd(nullptr), m_hDevNotify(nullptr) {};
+    WinUSBTransport(bool usbDebug) : USBTransport(usbDebug), m_hWnd(nullptr), m_hDevNotify(nullptr), m_hCriticalSectionMutex(nullptr) {};
     ~WinUSBTransport() override;
     int Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback) override;
     void Shutdown() override;
+
+    void BlockDeviceEnumeration() override;
+    void UnblockDeviceEnumeration() override;
 
 private:
     void RunHotplugHandler();
@@ -28,6 +31,7 @@ private:
     std::function<void(std::unique_ptr<USBDevice>)> m_deviceAddedCallback;
     HWND m_hWnd;
     HDEVNOTIFY m_hDevNotify;
+    HANDLE m_hCriticalSectionMutex;  // Serializes critical boot section across all instances
     std::thread m_hotplugThread;
     std::thread m_deviceEnumerationThread;
     std::atomic<bool> m_enumerationThreadRunning{false};

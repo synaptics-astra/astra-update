@@ -151,7 +151,7 @@ public:
     }
 
 private:
-    std::unique_ptr<USBTransport> m_transport;
+    std::shared_ptr<USBTransport> m_transport;
     std::function<void(AstraDeviceManagerResponse)> m_responseCallback;
     std::shared_ptr<AstraBootImage> m_bootImage;
     std::shared_ptr<FlashImage> m_flashImage;
@@ -190,9 +190,9 @@ private:
         uint16_t productId = m_bootImage->GetProductId();
 
 #if PLATFORM_WINDOWS
-        m_transport = std::make_unique<WinUSBTransport>(m_usbDebug);
+        m_transport = std::make_shared<WinUSBTransport>(m_usbDebug);
 #else
-        m_transport = std::make_unique<USBTransport>(m_usbDebug);
+        m_transport = std::make_shared<USBTransport>(m_usbDebug);
 #endif
 
         if (m_transport->Init(vendorId, productId, m_filterPorts,
@@ -234,12 +234,16 @@ private:
         log(ASTRA_LOG_LEVEL_DEBUG) << "Booting device" << endLog;
 
         if (astraDevice) {
+            // Block device enumeration for entire boot/update process
+            m_transport->BlockDeviceEnumeration();
+
             astraDevice->SetStatusCallback(m_responseCallback);
 
             log(ASTRA_LOG_LEVEL_DEBUG) << "Calling boot" << endLog;
             int ret = astraDevice->Boot(m_bootImage);
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to boot device" << endLog;
+                m_transport->UnblockDeviceEnumeration();
                 ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
                 return;
             }
@@ -249,6 +253,7 @@ private:
                 ret = astraDevice->Update(m_flashImage);
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to update device" << endLog;
+                    m_transport->UnblockDeviceEnumeration();
                     return;
                 }
             }
@@ -257,6 +262,7 @@ private:
             ret = astraDevice->WaitForCompletion();
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to wait for completion" << endLog;
+                m_transport->UnblockDeviceEnumeration();
                 return;
             }
 
@@ -272,6 +278,9 @@ private:
             }
 
             astraDevice->Close();
+
+            // Unblock device enumeration after boot/update completes
+            m_transport->UnblockDeviceEnumeration();
         }
     }
 
