@@ -39,9 +39,9 @@ int WinUSBTransport::Init(uint16_t vendorId, uint16_t productId, const std::stri
 
     m_deviceAddedCallback = deviceAddedCallback;
 
-    // Create a named mutex to serialize the critical boot section across all astra-boot instances
-    // This prevents firmware hangs when multiple devices reset simultaneously after loading miniloader
-    // The mutex provides automatic crash recovery via WAIT_ABANDONED
+    // Create a named mutex to serialize the critical boot section across all astra-update / astra-boot instances
+    // This prevents firmware hangs when multiple devices reset simultaneously after loading miniloader.
+    // The mutex provides automatic crash recovery via WAIT_ABANDONED.
     m_hCriticalSectionMutex = CreateMutex(nullptr, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
     if (!m_hCriticalSectionMutex) {
         DWORD error = GetLastError();
@@ -158,7 +158,7 @@ LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam
         }
     } else if (message == WM_CREATE) {
         CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
-        SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreate->lpCreateParams));;
+        SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreate->lpCreateParams));
     }
     return DefWindowProc(hWnd, message, wParam, lParam);
 }
@@ -222,7 +222,8 @@ void WinUSBTransport::ProcessPendingDevices()
         }
     }
 
-    // Let devices settle
+    // Let devices settle. Waiting here will make it less likely we need to retry and will
+    // actually improve overall detection time.
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     for (int retryCount = 0; retryCount < 3; ++retryCount) {
@@ -265,7 +266,9 @@ void WinUSBTransport::ProcessPendingDevices()
                 // just devices with a specific vid / pid. All USB devices are enumerated
                 // in this loop, including devices already in use by astra-update.
                 // On Windows try to open the device, if we get LIBUSB_ERROR_ACCESS then
-                // we are probably already using the device.
+                // we are probably already using the device. But, LIBUSB_ERROR_ACCESS is only
+                // returned if the device is open by another process. For single instances of astra-update / astra-boot
+                // we also rely on active device tracking to prevent duplicate opens.
                 libusb_device_handle *handle;
                 ret = libusb_open(device, &handle);
                 if (ret == LIBUSB_ERROR_ACCESS) {
