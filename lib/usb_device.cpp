@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <cstring>
 #include <chrono>
+#include <thread>
 
 #include "usb_device.hpp"
 #include "astra_log.hpp"
@@ -74,9 +75,58 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
         }
     }
 
-    ret = libusb_get_config_descriptor(libusb_get_device(m_handle), 0, &m_config);
-    if (ret < 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to get config descriptor: " << libusb_error_name(ret) << endLog;
+    // Detach kernel driver early - this can help with config descriptor access
+    // LIBUSB_ERROR_NOT_FOUND means no driver attached, LIBUSB_ERROR_INVALID_PARAM can occur
+    // if the device is in a bad state (e.g., 0 interfaces) - let the retry loop handle it
+    if (libusb_has_capability(LIBUSB_CAP_SUPPORTS_DETACH_KERNEL_DRIVER)) {
+        ret = libusb_detach_kernel_driver(m_handle, 0);
+        if (ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND && ret != LIBUSB_ERROR_INVALID_PARAM) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to detach kernel driver: " << libusb_error_name(ret) << endLog;
+            return -1;
+        }
+    }
+
+    // Get config descriptor with retry logic - device may be in transitional state
+    const int maxRetries = 4;
+    const int retryDelayMs = 100;
+    bool configValid = false;
+
+    for (int attempt = 0; attempt < maxRetries; ++attempt) {
+        if (m_config) {
+            libusb_free_config_descriptor(m_config);
+            m_config = nullptr;
+        }
+
+        ret = libusb_get_active_config_descriptor(libusb_get_device(m_handle), &m_config);
+        if (ret < 0) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Failed to get config descriptor (attempt "
+                << (attempt + 1) << "/" << maxRetries << "): " << libusb_error_name(ret) << endLog;
+        } else if (m_config->bNumInterfaces == 0) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Config descriptor has 0 interfaces (attempt "
+                << (attempt + 1) << "/" << maxRetries << ")" << endLog;
+        } else {
+            configValid = true;
+            break;
+        }
+
+        if (attempt < maxRetries - 1) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs));
+        }
+    }
+
+    // If retries failed, reset the device to unstick it and return error
+    // The reset will trigger re-enumeration and the transport will create a new device instance
+    if (!configValid) {
+        log(ASTRA_LOG_LEVEL_WARNING) << "Config descriptor invalid after " << maxRetries
+            << " attempts, resetting device" << endLog;
+
+        int resetRet = libusb_reset_device(m_handle);
+        if (resetRet < 0) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Device reset failed: " << libusb_error_name(resetRet) << endLog;
+        } else {
+            log(ASTRA_LOG_LEVEL_INFO) << "Device reset successful, waiting for re-enumeration" << endLog;
+        }
+
         return -1;
     }
 
@@ -110,95 +160,130 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << m_usbPath << endLog;
 
-    ret = libusb_detach_kernel_driver(m_handle, 0);
-    if (ret < 0) {
-        if (ret == LIBUSB_ERROR_NOT_FOUND || ret == LIBUSB_ERROR_NOT_SUPPORTED) {
-            // Since some platforms don't support kernel driver detaching, we'll just log the error and continue
-            log(ASTRA_LOG_LEVEL_INFO) << "Failed to detach kernel driver: " << libusb_error_name(ret) << endLog;
-        } else {
-            // If the error is something else, we'll return an error
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to detach kernel driver: " << libusb_error_name(ret) << endLog;
-            return -1;
-        }
-    }
-
     ret = libusb_claim_interface(m_handle, m_interfaceNumber);
     if (ret < 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to claim interface: " << libusb_error_name(ret) << endLog;
         return -1;
     }
 
+    // Find the claimed interface descriptor (use alternate setting 0)
+    const libusb_interface_descriptor *ifaceDesc = nullptr;
     for (int i = 0; i < m_config->bNumInterfaces; ++i) {
         const libusb_interface &interface = m_config->interface[i];
         for (int j = 0; j < interface.num_altsetting; ++j) {
             const libusb_interface_descriptor &altsetting = interface.altsetting[j];
-            log(ASTRA_LOG_LEVEL_INFO) << "Interface Descriptor:" << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bLength: " << static_cast<int>(altsetting.bLength) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bDescriptorType: " << static_cast<int>(altsetting.bDescriptorType) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceNumber: " << static_cast<int>(altsetting.bInterfaceNumber) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bAlternateSetting: " << static_cast<int>(altsetting.bAlternateSetting) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bNumEndpoints: " << static_cast<int>(altsetting.bNumEndpoints) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceClass: " << static_cast<int>(altsetting.bInterfaceClass) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceSubClass: " << static_cast<int>(altsetting.bInterfaceSubClass) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceProtocol: " << static_cast<int>(altsetting.bInterfaceProtocol) << endLog;
-            log(ASTRA_LOG_LEVEL_INFO) << "  iInterface: " << static_cast<int>(altsetting.iInterface) << endLog;
-
-            for (int k = 0; k < altsetting.bNumEndpoints; ++k) {
-                const libusb_endpoint_descriptor &endpoint = altsetting.endpoint[k];
-                log(ASTRA_LOG_LEVEL_INFO) << "Endpoint Descriptor:" << endLog;
-                log(ASTRA_LOG_LEVEL_INFO) << "  bLength: " << static_cast<int>(endpoint.bLength) << endLog;
-                log(ASTRA_LOG_LEVEL_INFO) << "  bDescriptorType: " << static_cast<int>(endpoint.bDescriptorType) << endLog;
-                log(ASTRA_LOG_LEVEL_INFO) << "  bEndpointAddress: " << static_cast<int>(endpoint.bEndpointAddress) << endLog;
-                log(ASTRA_LOG_LEVEL_INFO) << "  bmAttributes: " << static_cast<int>(endpoint.bmAttributes) << endLog;
-                log(ASTRA_LOG_LEVEL_INFO) << "  wMaxPacketSize: " << endpoint.wMaxPacketSize << endLog;
-                log(ASTRA_LOG_LEVEL_INFO) << "  bInterval: " << static_cast<int>(endpoint.bInterval) << endLog;
-
-                if (endpoint.bEndpointAddress & 0x80) {
-                    if (endpoint.bmAttributes == 3) {
-                        m_interruptInSize = endpoint.wMaxPacketSize;
-                        m_interruptInEndpoint = endpoint.bEndpointAddress;
-                    } else if (endpoint.bmAttributes == 2) {
-                        m_bulkInSize = endpoint.wMaxPacketSize;
-                        m_bulkInEndpoint = endpoint.bEndpointAddress;
-                    }
-                } else {
-                    if (endpoint.bmAttributes == 3) {
-                        m_interruptOutSize = endpoint.wMaxPacketSize;
-                        m_interruptOutEndpoint = endpoint.bEndpointAddress;
-                    } else if (endpoint.bmAttributes == 2) {
-                        m_bulkOutSize = endpoint.wMaxPacketSize;
-                        m_bulkOutEndpoint = endpoint.bEndpointAddress;
-                    }
-                }
-
-                ret = libusb_clear_halt(m_handle, endpoint.bEndpointAddress);
-                if (ret < 0) {
-                    log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint: " << libusb_error_name(ret) << endLog;
-                    return -1;
-                }
+            if (altsetting.bInterfaceNumber == m_interfaceNumber && altsetting.bAlternateSetting == 0) {
+                ifaceDesc = &altsetting;
+                break;
             }
+        }
+        if (ifaceDesc) break;
+    }
+
+    if (!ifaceDesc) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Interface " << m_interfaceNumber << " not found in config descriptor" << endLog;
+        return -1;
+    }
+
+    log(ASTRA_LOG_LEVEL_INFO) << "Interface Descriptor:" << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bLength: " << static_cast<int>(ifaceDesc->bLength) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bDescriptorType: " << static_cast<int>(ifaceDesc->bDescriptorType) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceNumber: " << static_cast<int>(ifaceDesc->bInterfaceNumber) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bAlternateSetting: " << static_cast<int>(ifaceDesc->bAlternateSetting) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bNumEndpoints: " << static_cast<int>(ifaceDesc->bNumEndpoints) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceClass: " << static_cast<int>(ifaceDesc->bInterfaceClass) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceSubClass: " << static_cast<int>(ifaceDesc->bInterfaceSubClass) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  bInterfaceProtocol: " << static_cast<int>(ifaceDesc->bInterfaceProtocol) << endLog;
+    log(ASTRA_LOG_LEVEL_INFO) << "  iInterface: " << static_cast<int>(ifaceDesc->iInterface) << endLog;
+
+    // Discover endpoints from the claimed interface
+    for (int k = 0; k < ifaceDesc->bNumEndpoints; ++k) {
+        const libusb_endpoint_descriptor &endpoint = ifaceDesc->endpoint[k];
+        log(ASTRA_LOG_LEVEL_INFO) << "Endpoint Descriptor:" << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bLength: " << static_cast<int>(endpoint.bLength) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bDescriptorType: " << static_cast<int>(endpoint.bDescriptorType) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bEndpointAddress: " << static_cast<int>(endpoint.bEndpointAddress) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bmAttributes: " << static_cast<int>(endpoint.bmAttributes) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  wMaxPacketSize: " << endpoint.wMaxPacketSize << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bInterval: " << static_cast<int>(endpoint.bInterval) << endLog;
+
+        uint8_t transferType = endpoint.bmAttributes & LIBUSB_TRANSFER_TYPE_MASK;
+        bool isIn = (endpoint.bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK) == LIBUSB_ENDPOINT_IN;
+
+        if (isIn) {
+            if (transferType == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
+                m_interruptInSize = endpoint.wMaxPacketSize;
+                m_interruptInEndpoint = endpoint.bEndpointAddress;
+            } else if (transferType == LIBUSB_TRANSFER_TYPE_BULK) {
+                m_bulkInSize = endpoint.wMaxPacketSize;
+                m_bulkInEndpoint = endpoint.bEndpointAddress;
+            }
+        } else {
+            if (transferType == LIBUSB_TRANSFER_TYPE_INTERRUPT) {
+                m_interruptOutSize = endpoint.wMaxPacketSize;
+                m_interruptOutEndpoint = endpoint.bEndpointAddress;
+            } else if (transferType == LIBUSB_TRANSFER_TYPE_BULK) {
+                m_bulkOutSize = endpoint.wMaxPacketSize;
+                m_bulkOutEndpoint = endpoint.bEndpointAddress;
+            }
+        }
+
+        // Clear any halt condition on the endpoint
+        ret = libusb_clear_halt(m_handle, endpoint.bEndpointAddress);
+        if (ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint 0x"
+                << std::hex << static_cast<int>(endpoint.bEndpointAddress) << std::dec
+                << ": " << libusb_error_name(ret) << endLog;
+            return -1;
         }
     }
 
+    // Validate that required endpoints were found
+    if (m_interruptInEndpoint == 0 || m_interruptInSize == 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt IN endpoint not found" << endLog;
+        return -1;
+    }
+    if (m_interruptOutEndpoint == 0 || m_interruptOutSize == 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt OUT endpoint not found" << endLog;
+        return -1;
+    }
+    if (m_bulkOutEndpoint == 0 || m_bulkOutSize == 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Bulk OUT endpoint not found" << endLog;
+        return -1;
+    }
+
+    log(ASTRA_LOG_LEVEL_DEBUG) << "Discovered endpoints - Interrupt IN: 0x" << std::hex
+        << static_cast<int>(m_interruptInEndpoint) << ", Interrupt OUT: 0x"
+        << static_cast<int>(m_interruptOutEndpoint) << ", Bulk OUT: 0x"
+        << static_cast<int>(m_bulkOutEndpoint) << std::dec << endLog;
+
+    // Allocate transfers and buffers with cleanup on failure
     m_inputInterruptXfer = libusb_alloc_transfer(0);
     if (!m_inputInterruptXfer) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate input interrupt transfer" << endLog;
         return -1;
     }
+
     m_outputInterruptXfer = libusb_alloc_transfer(0);
     if (!m_outputInterruptXfer) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate output interrupt transfer" << endLog;
+        libusb_free_transfer(m_inputInterruptXfer);
+        m_inputInterruptXfer = nullptr;
+        return -1;
+    }
+
+    m_bulkWriteXfer = libusb_alloc_transfer(0);
+    if (!m_bulkWriteXfer) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate bulk out transfer" << endLog;
+        libusb_free_transfer(m_inputInterruptXfer);
+        m_inputInterruptXfer = nullptr;
+        libusb_free_transfer(m_outputInterruptXfer);
+        m_outputInterruptXfer = nullptr;
         return -1;
     }
 
     m_interruptInBuffer = new uint8_t[m_interruptInSize];
     m_interruptOutBuffer = new uint8_t[m_interruptOutSize];
-
-    m_bulkWriteXfer = libusb_alloc_transfer(0);
-    if (!m_bulkWriteXfer) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate bulk out transfer" << endLog;
-        return -1;
-    }
 
     libusb_fill_interrupt_transfer(m_inputInterruptXfer, m_handle, m_interruptInEndpoint,
         m_interruptInBuffer, m_interruptInSize, HandleTransfer, this, 0);
@@ -210,6 +295,16 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
     if (ret < 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
         m_running.store(false);
+        delete[] m_interruptInBuffer;
+        m_interruptInBuffer = nullptr;
+        delete[] m_interruptOutBuffer;
+        m_interruptOutBuffer = nullptr;
+        libusb_free_transfer(m_inputInterruptXfer);
+        m_inputInterruptXfer = nullptr;
+        libusb_free_transfer(m_outputInterruptXfer);
+        m_outputInterruptXfer = nullptr;
+        libusb_free_transfer(m_bulkWriteXfer);
+        m_bulkWriteXfer = nullptr;
         return ret;
     }
 
@@ -352,6 +447,11 @@ void USBDevice::Close()
             libusb_release_interface(m_handle, m_interfaceNumber);
             libusb_close(m_handle);
             m_handle = nullptr;
+        }
+
+        if (m_config) {
+            libusb_free_config_descriptor(m_config);
+            m_config = nullptr;
         }
 
         libusb_unref_device(m_device);
