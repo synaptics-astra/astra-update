@@ -51,7 +51,7 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
 
     int ret = 0;
 
-    if (m_handle && m_config) {
+    if (m_config) {
         log(ASTRA_LOG_LEVEL_INFO) << "USB device is already open" << endLog;
         return 0;
     }
@@ -61,19 +61,6 @@ int USBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t size
     }
 
     m_usbEventCallback = usbEventCallback;
-
-    if (m_handle == nullptr) {
-        ret = libusb_open(m_device, &m_handle);
-        if (ret < 0) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open USB device: " << libusb_error_name(ret) << endLog;
-            return -1;
-        }
-
-        if (m_handle == nullptr) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open USB device" << endLog;
-            return -1;
-        }
-    }
 
     // Detach kernel driver early - this can help with config descriptor access
     // LIBUSB_ERROR_NOT_FOUND means no driver attached, LIBUSB_ERROR_INVALID_PARAM can occur
