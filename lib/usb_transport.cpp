@@ -223,7 +223,18 @@ int LIBUSB_CALL USBTransport::HotplugEventCallback(libusb_context *ctx, libusb_d
             return 0;
         }
 
-        std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, transport->m_ctx);
+        // Validate device is accessible before passing to callback
+        // If the device is in a bad state (e.g., kernel failed to configure it),
+        // skip it and wait for re-enumeration
+        libusb_device_handle *handle = nullptr;
+        ret = libusb_open(device, &handle);
+        if (ret < 0) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Device not accessible (" << libusb_error_name(ret)
+                << "), skipping and waiting for re-enumeration" << endLog;
+            return 0;
+        }
+
+        std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, transport->m_ctx, handle);
         if (transport->m_deviceAddedCallback) {
             try {
                 transport->m_deviceAddedCallback(std::move(usbDevice));

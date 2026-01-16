@@ -47,6 +47,7 @@ public:
     int ReceiveFromConsole(std::string &data);
 
     std::string GetDeviceName();
+    std::string GetUSBPath();
     AstraDeviceStatus GetDeviceStatus();
 
     void Close();

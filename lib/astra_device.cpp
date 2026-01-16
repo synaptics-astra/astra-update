@@ -229,6 +229,11 @@ public:
         return m_deviceName;
     }
 
+    std::string GetUSBPath()
+    {
+        return m_usbDevice->GetUSBPath();
+    }
+
     AstraDeviceStatus GetDeviceStatus()
     {
         return m_status;
@@ -374,16 +379,17 @@ private:
         } else if (event == USBDevice::USB_DEVICE_EVENT_NO_DEVICE || event == USBDevice::USB_DEVICE_EVENT_TRANSFER_CANCELED ||
             event == USBDevice::USB_DEVICE_EVENT_TRANSFER_ERROR)
         {
-            // When using SU-Boot the gen3_miniloader.bin.usb image seems to
+            // When using SU-Boot the gen3_miniloader.bin.usb image will
             // cause the device to reset and reconnect. Suppress reporting this as a failure.
             if (m_requestedImageName == "gen3_miniloader.bin.usb") {
-                log(ASTRA_LOG_LEVEL_WARNING) << "Device disconnected: after sending gen3_miniloader.bin.usb" << endLog;
+                log(ASTRA_LOG_LEVEL_INFO) << "Device disconnected: after sending gen3_miniloader.bin.usb" << endLog;
             } else {
                 // device disappeared or reported an error.
                 // If this occurred during boot or an update then report a failure.
                 // This this happened after and successful update then this is just
                 // the device rebooting so report success.
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Device disconnected: shutting down" << endLog;
+
                 if (m_status == ASTRA_DEVICE_STATUS_UPDATE_PROGRESS) {
                     m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
                 } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS) {
@@ -536,14 +542,26 @@ private:
 
             log(ASTRA_LOG_LEVEL_DEBUG) << "after m_imageRequestCV.wait()" << endLog;
             if (!m_running.load()) {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Image Request received when AstraDevice is not running" << endLog;
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Image Request received when AstraDevice is not running: " << m_requestedImageName << endLog;
                 return 0;
             }
 
             if (!notified) {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Timeout waiting for image request" << endLog;
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Timeout waiting for image request: device status: " << AstraDeviceStatusToString(m_status) << endLog;
                 if (m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS) {
                     SendStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Timeout during boot, press RESET while holding USB_BOOT to try again");
+                    return -1;
+                } else if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                    // Update is complete, but the device has not disconnected yet.
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
+                    return 0;
+                } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_START) {
+                    // Update failed to start. Device maybe in an invalid state.
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "Update failed to start:" << endLog;
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
                     return -1;
                 } else {
                     continue;
@@ -591,6 +609,7 @@ private:
 
                 ret = SendImage(image);
                 log(ASTRA_LOG_LEVEL_DEBUG) << "After send image: " << image->GetName() << endLog;
+
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send image" << endLog;
                     if (m_status == ASTRA_DEVICE_STATUS_BOOT_START || m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS) {
@@ -684,6 +703,10 @@ int AstraDevice::ReceiveFromConsole(std::string &data) {
 
 std::string AstraDevice::GetDeviceName() {
     return pImpl->GetDeviceName();
+}
+
+std::string AstraDevice::GetUSBPath() {
+    return pImpl->GetUSBPath();
 }
 
 AstraDeviceStatus AstraDevice::GetDeviceStatus() {
