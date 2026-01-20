@@ -100,7 +100,12 @@ void EmmcFlashImage::ParseEmmcImageList()
         std::string name;
         if (std::getline(iss, name, ',')) {
             name.erase(name.find_last_not_of(",") + 1);
-            lastEntryName = name;
+            if (name != "erase" && name != "format") {
+                // Ignore erase and format operations since they do not send images to the device.
+                // When this is the final operation, waiting for a image request will cause a timeout and
+                // incorrectly report a failure.
+                lastEntryName = name;
+            }
         }
     }
 
