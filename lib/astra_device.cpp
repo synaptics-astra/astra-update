@@ -440,6 +440,8 @@ private:
             return ret;
         }
 
+        // Time duration of sending an image
+        auto sendStart = std::chrono::steady_clock::now();
         SendStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_START, 0, image->GetName());
 
         const int imageHeaderSize = sizeof(uint32_t) * 2;
@@ -499,6 +501,10 @@ private:
         }
 
         SendStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE, 100, image->GetName());
+
+        auto sendEnd = std::chrono::steady_clock::now();
+        auto durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(sendEnd - sendStart).count();
+        log(ASTRA_LOG_LEVEL_INFO) << "Image Transfer Duration: " << image->GetName() << ": " << durationMs << " ms" << endLog;
 
         return 0;
     }
