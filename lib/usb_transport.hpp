@@ -26,7 +26,7 @@ public:
 
     // Block/unblock device enumeration during critical boot sequences
     // Default implementations are no-ops for non-Windows platforms
-    virtual void BlockDeviceEnumeration() {}
+    virtual bool BlockDeviceEnumeration() { return true; }
     virtual void UnblockDeviceEnumeration() {}
     virtual void RemoveActiveDevice(const std::string& usbPath) {}
 

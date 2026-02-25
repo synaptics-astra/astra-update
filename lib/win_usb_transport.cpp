@@ -45,18 +45,11 @@ int WinUSBTransport::Init(uint16_t vendorId, uint16_t productId, const std::stri
     //
     // Serializing the update process across multiple instances slows down parallel flashing significantly. It maybe
     // faster to simply retry failed updates if they only occur rarely. For now disable this feature by default.
-    // Set m_enableSerialUpdate to true in the construtor to enable it when needed.
+    // Set m_enableSerialUpdate to true in the constructor to enable it when needed.
     if (m_enableSerialUpdate) {
         m_hCriticalSectionMutex = CreateMutex(nullptr, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
         if (!m_hCriticalSectionMutex) {
-            DWORD error = GetLastError();
-            if (error == ERROR_ALREADY_EXISTS) {
-                // Mutex already exists, which is fine - we'll use the existing one
-                m_hCriticalSectionMutex = OpenMutex(SYNCHRONIZE, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
-            }
-            if (!m_hCriticalSectionMutex) {
-                log(ASTRA_LOG_LEVEL_WARNING) << "Failed to create critical section mutex: " << GetLastError() << endLog;
-            }
+            log(ASTRA_LOG_LEVEL_WARNING) << "Failed to create critical section mutex: " << GetLastError() << endLog;
         }
     }
 
@@ -329,24 +322,30 @@ void WinUSBTransport::ProcessPendingDevices()
     }
 }
 
-void WinUSBTransport::BlockDeviceEnumeration()
+bool WinUSBTransport::BlockDeviceEnumeration()
 {
     ASTRA_LOG;
 
-    if (m_hCriticalSectionMutex) {
-        // Acquire the mutex to serialize critical boot section across all instances
-        // This prevents device detection during critical boot sequences.
-        DWORD waitResult = WaitForSingleObject(m_hCriticalSectionMutex, 30000); // 30 second timeout
-        if (waitResult == WAIT_OBJECT_0) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Acquired critical section mutex" << endLog;
-        } else if (waitResult == WAIT_ABANDONED) {
-            // Previous owner crashed - we now own the mutex and can proceed
-            log(ASTRA_LOG_LEVEL_WARNING) << "Acquired abandoned critical section mutex (previous owner crashed)" << endLog;
-        } else if (waitResult == WAIT_TIMEOUT) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Timeout waiting for critical section mutex" << endLog;
-        } else {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to acquire critical section mutex: " << waitResult << endLog;
-        }
+    if (!m_hCriticalSectionMutex) {
+        return true;
+    }
+
+    // Acquire the mutex to serialize critical boot section across all instances
+    // This prevents device detection during critical boot sequences.
+    DWORD waitResult = WaitForSingleObject(m_hCriticalSectionMutex, 30000); // 30 second timeout
+    if (waitResult == WAIT_OBJECT_0) {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Acquired critical section mutex" << endLog;
+        return true;
+    } else if (waitResult == WAIT_ABANDONED) {
+        // Previous owner crashed - we now own the mutex and can proceed
+        log(ASTRA_LOG_LEVEL_WARNING) << "Acquired abandoned critical section mutex (previous owner crashed)" << endLog;
+        return true;
+    } else if (waitResult == WAIT_TIMEOUT) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Timeout waiting for critical section mutex" << endLog;
+        return false;
+    } else {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to acquire critical section mutex: " << waitResult << endLog;
+        return false;
     }
 }
 

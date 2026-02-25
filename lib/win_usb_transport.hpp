@@ -20,7 +20,7 @@ public:
     int Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback) override;
     void Shutdown() override;
 
-    void BlockDeviceEnumeration() override;
+    bool BlockDeviceEnumeration() override;
     void UnblockDeviceEnumeration() override;
     void RemoveActiveDevice(const std::string& usbPath) override;
 

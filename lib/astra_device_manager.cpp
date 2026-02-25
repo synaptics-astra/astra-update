@@ -237,7 +237,13 @@ private:
 
         if (astraDevice) {
             // Block device enumeration for entire boot/update process
-            m_transport->BlockDeviceEnumeration();
+            bool enumerationBlocked = m_transport->BlockDeviceEnumeration();
+            if (!enumerationBlocked) {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to block device enumeration, aborting device operation" << endLog;
+                m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
+                ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to acquire device enumeration lock"}});
+                return;
+            }
 
             astraDevice->SetStatusCallback(m_responseCallback);
 
@@ -246,7 +252,9 @@ private:
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to boot device" << endLog;
                 m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
-                m_transport->UnblockDeviceEnumeration();
+                if (enumerationBlocked) {
+                    m_transport->UnblockDeviceEnumeration();
+                }
                 ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
                 return;
             }
@@ -257,7 +265,9 @@ private:
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to update device" << endLog;
                     m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
-                    m_transport->UnblockDeviceEnumeration();
+                    if (enumerationBlocked) {
+                        m_transport->UnblockDeviceEnumeration();
+                    }
                     return;
                 }
             }
@@ -267,7 +277,9 @@ private:
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to wait for completion" << endLog;
                 m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
-                m_transport->UnblockDeviceEnumeration();
+                if (enumerationBlocked) {
+                    m_transport->UnblockDeviceEnumeration();
+                }
                 return;
             }
 
@@ -288,7 +300,9 @@ private:
             m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
 
             // Unblock device enumeration after boot/update completes
-            m_transport->UnblockDeviceEnumeration();
+            if (enumerationBlocked) {
+                m_transport->UnblockDeviceEnumeration();
+            }
         }
     }
 
