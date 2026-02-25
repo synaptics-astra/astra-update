@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <iomanip>
 #include <cstring>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -389,38 +390,74 @@ void USBDevice::Close()
             }
         }
 
-        // Wait for cancellation callbacks to complete (with timeout for safety)
-        // DeviceMonitorThread will process these callbacks and notify us
+        // Wait for cancellation callbacks to complete.
+        // If cancellation exceeds the soft timeout, continue waiting up to a hard timeout.
         if (waitForInputInterrupt || waitForOutputInterrupt || waitForBulkWrite) {
-            std::unique_lock<std::mutex> lock(m_cancellationMutex);
-            m_cancellationCV.wait_for(lock, std::chrono::milliseconds(500), [&]() {
-                bool allCancelled = true;
+            auto allCancelled = [&]() {
+                bool allDone = true;
                 if (waitForInputInterrupt && !m_inputInterruptCancelled.load()) {
-                    allCancelled = false;
+                    allDone = false;
                 }
                 if (waitForOutputInterrupt && !m_outputInterruptCancelled.load()) {
-                    allCancelled = false;
+                    allDone = false;
                 }
                 if (waitForBulkWrite && !m_bulkWriteCancelled.load()) {
-                    allCancelled = false;
+                    allDone = false;
                 }
-                return allCancelled;
-            });
+                return allDone;
+            };
+
+            std::unique_lock<std::mutex> lock(m_cancellationMutex);
+            if (!m_cancellationCV.wait_for(lock, std::chrono::milliseconds(500), allCancelled)) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "Transfer cancellation exceeded 500ms; continuing to wait" << endLog;
+
+                const auto hardDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                while (!allCancelled()) {
+                    auto now = std::chrono::steady_clock::now();
+                    if (now >= hardDeadline) {
+                        break;
+                    }
+
+                    auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(hardDeadline - now);
+                    auto waitChunk = std::min<std::chrono::milliseconds>(remaining, std::chrono::milliseconds(200));
+                    m_cancellationCV.wait_for(lock, waitChunk, allCancelled);
+                }
+
+                if (!allCancelled()) {
+                    log(ASTRA_LOG_LEVEL_ERROR) << "Timed out waiting for transfer cancellation; pending transfers will not be freed" << endLog;
+                }
+            }
         }
 
-        // Free transfers
+        // Free transfers only when cancel callbacks completed (or cancel was not required).
+        bool canFreeInputInterrupt = !waitForInputInterrupt || m_inputInterruptCancelled.load();
+        bool canFreeOutputInterrupt = !waitForOutputInterrupt || m_outputInterruptCancelled.load();
+        bool canFreeBulkWrite = !waitForBulkWrite || m_bulkWriteCancelled.load();
+
         if (m_inputInterruptXfer) {
-            libusb_free_transfer(m_inputInterruptXfer);
+            if (canFreeInputInterrupt) {
+                libusb_free_transfer(m_inputInterruptXfer);
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Leaking input interrupt transfer to avoid unsafe free while cancellation is pending" << endLog;
+            }
             m_inputInterruptXfer = nullptr;
         }
 
         if (m_outputInterruptXfer) {
-            libusb_free_transfer(m_outputInterruptXfer);
+            if (canFreeOutputInterrupt) {
+                libusb_free_transfer(m_outputInterruptXfer);
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Leaking output interrupt transfer to avoid unsafe free while cancellation is pending" << endLog;
+            }
             m_outputInterruptXfer = nullptr;
         }
 
         if (m_bulkWriteXfer) {
-            libusb_free_transfer(m_bulkWriteXfer);
+            if (canFreeBulkWrite) {
+                libusb_free_transfer(m_bulkWriteXfer);
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Leaking bulk write transfer to avoid unsafe free while cancellation is pending" << endLog;
+            }
             m_bulkWriteXfer = nullptr;
         }
 
