@@ -42,15 +42,21 @@ int WinUSBTransport::Init(uint16_t vendorId, uint16_t productId, const std::stri
     // Create a named mutex to serialize the critical boot section across all astra-update / astra-boot instances
     // This prevents firmware hangs when multiple devices reset simultaneously after loading miniloader.
     // The mutex provides automatic crash recovery via WAIT_ABANDONED.
-    m_hCriticalSectionMutex = CreateMutex(nullptr, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
-    if (!m_hCriticalSectionMutex) {
-        DWORD error = GetLastError();
-        if (error == ERROR_ALREADY_EXISTS) {
-            // Mutex already exists, which is fine - we'll use the existing one
-            m_hCriticalSectionMutex = OpenMutex(SYNCHRONIZE, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
-        }
+    //
+    // Serializing the update process across multiple instances slows down parallel flashing significantly. It maybe
+    // faster to simply retry failed updates if they only occur rarely. For now disable this feature by default.
+    // Set m_enableSerialUpdate to true in the construtor to enable it when needed.
+    if (m_enableSerialUpdate) {
+        m_hCriticalSectionMutex = CreateMutex(nullptr, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
         if (!m_hCriticalSectionMutex) {
-            log(ASTRA_LOG_LEVEL_WARNING) << "Failed to create critical section mutex: " << GetLastError() << endLog;
+            DWORD error = GetLastError();
+            if (error == ERROR_ALREADY_EXISTS) {
+                // Mutex already exists, which is fine - we'll use the existing one
+                m_hCriticalSectionMutex = OpenMutex(SYNCHRONIZE, FALSE, TEXT("Global\\AstraManagerCriticalSection"));
+            }
+            if (!m_hCriticalSectionMutex) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "Failed to create critical section mutex: " << GetLastError() << endLog;
+            }
         }
     }
 

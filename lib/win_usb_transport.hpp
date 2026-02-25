@@ -35,6 +35,7 @@ private:
     HWND m_hWnd;
     HDEVNOTIFY m_hDevNotify;
     HANDLE m_hCriticalSectionMutex;  // Serializes critical boot section across all instances
+    bool m_enableSerialUpdate{false};
     std::thread m_hotplugThread;
     std::thread m_deviceEnumerationThread;
     std::atomic<bool> m_enumerationThreadRunning{false};
