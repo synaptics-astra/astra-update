@@ -9,14 +9,15 @@
 #include <functional>
 #include <condition_variable>
 #include <mutex>
+#include <queue>
+#include <vector>
 #include <libusb-1.0/libusb.h>
-#include <mutex>
 
 #include "device.hpp"
 
 class USBDevice : public Device {
 public:
-    USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx);
+    USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx, libusb_device_handle *handle);
     ~USBDevice();
 
     enum USBEvent {
@@ -71,6 +72,26 @@ private:
     int m_bulkTransferTimeout;
 
     std::function<void(USBEvent event, uint8_t *buf, size_t size)> m_usbEventCallback;
+
+    // Async callback processing
+    struct CallbackEvent {
+        USBEvent event;
+        std::vector<uint8_t> data;
+    };
+    std::queue<CallbackEvent> m_callbackQueue;
+    std::mutex m_callbackQueueMutex;
+    std::condition_variable m_callbackQueueCV;
+    std::thread m_callbackThread;
+    std::atomic<bool> m_callbackThreadRunning{false};
+
+    // Transfer cancellation tracking
+    std::atomic<bool> m_inputInterruptCancelled{false};
+    std::atomic<bool> m_outputInterruptCancelled{false};
+    std::atomic<bool> m_bulkWriteCancelled{false};
+    std::mutex m_cancellationMutex;
+    std::condition_variable m_cancellationCV;
+
+    void CallbackWorkerThread();
 
     static void LIBUSB_CALL HandleTransfer(struct libusb_transfer *transfer);
 };
