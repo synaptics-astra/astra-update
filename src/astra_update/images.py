@@ -8,7 +8,7 @@ from the C++ factories.
 from typing import Optional
 from pathlib import Path
 
-from astra_update import FlashImage
+from ._astra_update import FlashImage
 
 
 def load_flash_image(

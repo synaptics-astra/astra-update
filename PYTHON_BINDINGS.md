@@ -40,22 +40,21 @@ You must have the following installed:
    cmake --build . --config Release
    ```
 
-4. The built module will be in `build_py/lib/` as:
-   - Windows: `astra_update.pyd`
-   - Linux/macOS: `astra_update.so`
+4. During the build, the extension module is copied into `src/astra_update/` as:
+    - Windows: `_astra_update*.pyd`
+    - Linux/macOS: `_astra_update*.so`
 
 ### Installation
 
 You can either:
 
-1. **Direct usage** (if module is in Python path):
+1. **Direct usage from source tree**:
    ```bash
-   PYTHONPATH=/path/to/build_py/lib python -m astra_update_boot <images>
+    PYTHONPATH=/path/to/astra-update/src python -m astra_update_boot <images>
    ```
 
-2. **Install in Python environment**:
+2. **Install in Python environment (run from repo root)**:
    ```bash
-   cd build_py/lib
    python -m pip install .
    ```
 
@@ -310,7 +309,7 @@ python -m pytest tests/test_integration.py -v      # Full integration tests
 
 The Python module isn't built yet. Run build steps above, then ensure:
 ```bash
-export PYTHONPATH=/path/to/build_py/lib:$PYTHONPATH
+export PYTHONPATH=/path/to/astra-update/src:$PYTHONPATH
 ```
 
 ### Permission Denied on USB Device

@@ -100,18 +100,27 @@ FetchContent_MakeAvailable(pybind11)
 # Find Python
 find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
-# Build Python module
-pybind11_add_module(astra_update astra_update_py.cpp)
+# Build Python extension module (_astra_update follows the common
+# underscore-prefixed naming convention for native extension modules).
+pybind11_add_module(_astra_update astra_update_py.cpp)
 
 # Link the static library to the Python module
-target_link_libraries(astra_update PRIVATE astraupdate)
+target_link_libraries(_astra_update PRIVATE astraupdate)
 
 # Add dependency to ensure astraupdate is built first
-add_dependencies(astra_update astraupdate)
+add_dependencies(_astra_update astraupdate)
 
 # Include directories needed for the Python module
-target_include_directories(astra_update PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_include_directories(astra_update PRIVATE ${CMAKE_SOURCE_DIR}/lib)
-target_include_directories(astra_update PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/include)
-target_include_directories(astra_update PRIVATE ${CMAKE_BINARY_DIR}/libusb/include)
-target_include_directories(astra_update PRIVATE ${CMAKE_BINARY_DIR}/zlib/include)
+target_include_directories(_astra_update PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(_astra_update PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/include)
+target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/libusb/include)
+target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/zlib/include)
+
+# Copy the built extension into the package source tree. This enables
+# pip-based installs from the repository root after the CMake build step.
+add_custom_command(TARGET _astra_update POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:_astra_update>
+        ${CMAKE_SOURCE_DIR}/src/astra_update/$<TARGET_FILE_NAME:_astra_update>
+)

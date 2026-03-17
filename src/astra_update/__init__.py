@@ -6,8 +6,8 @@ This package provides Python access to the astra-update library through pybind11
 
 __version__ = "2.0.0-dev"
 
-# Import core bindings from C++ module
-from astra_update import (
+# Import core bindings from package-local native C++ extension module.
+from ._astra_update import (
     AstraDeviceManager,
     DeviceManagerResponse,
     DeviceResponse,

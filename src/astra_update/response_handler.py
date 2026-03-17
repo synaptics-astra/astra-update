@@ -11,8 +11,8 @@ import threading
 import time
 from dataclasses import dataclass
 
-# Import from C++ bindings
-from astra_update import (
+# Import from package-local native extension module
+from ._astra_update import (
     DeviceManagerResponse,
     DeviceResponse,
     ManagerResponse,

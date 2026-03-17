@@ -58,7 +58,7 @@ void ResponseQueueCallback(AstraDeviceManagerResponse response) {
     ResponseQueue::GetInstance().Put(response);
 }
 
-PYBIND11_MODULE(astra_update, m) {
+PYBIND11_MODULE(_astra_update, m) {
     m.doc() = "Astra Update Library Python Bindings";
 
     // Enums
