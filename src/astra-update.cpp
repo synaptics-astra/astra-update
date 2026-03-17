@@ -16,7 +16,7 @@
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
-const std::string astraUpdateVersion = "1.1.0";
+const std::string astraUpdateVersion = "2.0.0-dev";
 
 // Define a struct to hold the two strings
 struct DeviceImageKey {
@@ -103,7 +103,7 @@ int main(int argc, char* argv[])
     std::signal(SIGINT, SignalHandler);
 
     options.add_options()
-        ("B,boot-image-collection", "Astra Boot Image path", cxxopts::value<std::string>()->default_value("astra-usbboot-images"))
+        ("B,boot-image-collection", "Astra Boot Image path (default: $ASTRA_USBBOOT_IMAGES or astra-usbboot-images)", cxxopts::value<std::string>())
         ("l,log", "Log file path", cxxopts::value<std::string>()->default_value(""))
         ("D,debug", "Enable debug logging", cxxopts::value<bool>()->default_value("false"))
         ("C,continuous", "Enabled updating multiple devices", cxxopts::value<bool>()->default_value("false"))
@@ -146,7 +146,13 @@ int main(int argc, char* argv[])
     }
 
     std::string flashImagePath = result["flash"].as<std::string>();
-    std::string bootImagesPath = result["boot-image-collection"].as<std::string>();
+    std::string bootImagesPath;
+    if (result.count("boot-image-collection")) {
+        bootImagesPath = result["boot-image-collection"].as<std::string>();
+    } else {
+        const char *envPath = std::getenv("ASTRA_USBBOOT_IMAGES");
+        bootImagesPath = (envPath != nullptr && envPath[0] != '\0') ? envPath : "astra-usbboot-images";
+    }
     std::string logFilePath = result["log"].as<std::string>();
     std::string tempDir = result["temp-dir"].as<std::string>();
     bool debug = result["debug"].as<bool>();
