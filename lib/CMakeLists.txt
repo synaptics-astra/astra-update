@@ -89,3 +89,29 @@ if(ASTRA_ENABLE_COVERAGE)
     target_compile_options(astraupdate PRIVATE --coverage -O0 -g)
     target_link_libraries(astraupdate INTERFACE --coverage)
 endif()
+
+# Python bindings with pybind11
+FetchContent_Declare(pybind11
+    GIT_REPOSITORY https://github.com/pybind/pybind11.git
+    GIT_TAG v2.11.1
+)
+FetchContent_MakeAvailable(pybind11)
+
+# Find Python
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
+
+# Build Python module
+pybind11_add_module(astra_update astra_update_py.cpp)
+
+# Link the static library to the Python module
+target_link_libraries(astra_update PRIVATE astraupdate)
+
+# Add dependency to ensure astraupdate is built first
+add_dependencies(astra_update astraupdate)
+
+# Include directories needed for the Python module
+target_include_directories(astra_update PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(astra_update PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+target_include_directories(astra_update PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/include)
+target_include_directories(astra_update PRIVATE ${CMAKE_BINARY_DIR}/libusb/include)
+target_include_directories(astra_update PRIVATE ${CMAKE_BINARY_DIR}/zlib/include)
