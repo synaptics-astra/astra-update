@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdint>
 
+#include "astra_device.hpp"
 #include "image.hpp"
 
 enum AstraUbootConsole {
@@ -31,6 +32,9 @@ public:
 
     uint16_t GetVendorId() const { return m_vendorId; }
     uint16_t GetProductId() const { return m_productId; }
+    std::vector<std::pair<uint16_t, uint16_t>> GetVendorProductIdPairs() const;
+    uint16_t GetSysMgrVendorId() const { return m_sysMgrVendorId; }
+    uint16_t GetSysMgrProductId() const { return m_sysMgrProductId; }
     std::string GetChipName() const { return m_chipName; }
     std::string GetBoardName() const { return m_boardName; }
     std::string GetID() const { return m_id; }
@@ -39,10 +43,12 @@ public:
     AstraUbootConsole GetUbootConsole() const { return m_ubootConsole; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
     AstraMemoryDDRType GetMemoryDDRType() const { return m_memoryDDRType; }
+    AstraTransportType GetTransportType() const { return m_transportType; }
     const std::vector<Image>& GetImages() const { return m_images; }
     AstraUbootVariant GetUbootVariant() const { return m_ubootVariant; }
     const std::string GetFinalBootImage() const { return m_finalBootImage; }
     bool IsLinuxBoot() const { return m_linuxBoot; }
+    AstraDeviceBootStage GetDefaultBootStage() const { return m_defaultBootStage; }
 
 private:
     std::string m_path;
@@ -56,11 +62,15 @@ private:
     AstraUbootConsole m_ubootConsole;
     AstraMemoryLayout m_memoryLayout;
     AstraMemoryDDRType m_memoryDDRType;
+    AstraTransportType m_transportType;
     uint16_t m_vendorId;
     uint16_t m_productId;
+    uint16_t m_sysMgrVendorId;
+    uint16_t m_sysMgrProductId;
     AstraUbootVariant m_ubootVariant;
     std::string m_finalBootImage;
     bool m_linuxBoot = false;
+    AstraDeviceBootStage m_defaultBootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
 
     bool LoadManifest(std::string manifestPath);
 };

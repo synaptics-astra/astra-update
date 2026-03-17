@@ -11,14 +11,17 @@
 #include <mutex>
 #include <queue>
 #include <vector>
-#include <libusb-1.0/libusb.h>
 
 #include "device.hpp"
+#include "astra_log.hpp"
 
 class USBDevice : public Device {
 public:
-    USBDevice(libusb_device *device, const std::string &usbPath, libusb_context *ctx, libusb_device_handle *handle);
-    ~USBDevice();
+    USBDevice(const std::string &usbPath) : m_usbPath(usbPath), m_interfaceNumber(0)
+    {
+        ASTRA_LOG;
+    }
+    ~USBDevice() override;
 
     enum USBEvent {
         USB_DEVICE_EVENT_NO_DEVICE,
@@ -27,24 +30,20 @@ public:
         USB_DEVICE_EVENT_INTERRUPT,
     };
 
-    int Open(std::function<void(USBEvent event, uint8_t *buf, size_t size)> usbEventCallback);
-    int EnableInterrupts();
-    void Close() override;
+    virtual int Open(std::function<void(USBEvent event, uint8_t *buf, size_t size)> usbEventCallback) = 0;
+    virtual int EnableInterrupts();
+    void Close() override = 0;
 
     std::string &GetUSBPath() { return m_usbPath; }
+    virtual uint16_t GetVendorId() const { return 0; }
+    virtual uint16_t GetProductId() const { return 0; }
+    virtual uint8_t GetNumInterfaces() const { return 0; }
 
-    int Write(uint8_t *data, size_t size, int *transferred) override;
+    int Write(uint8_t *data, size_t size, int *transferred) override = 0;
 
-    int WriteInterruptData(const uint8_t *data, size_t size);
+    virtual int WriteInterruptData(const uint8_t *data, size_t size) = 0;
 
-private:
-    libusb_device *m_device;
-    libusb_context *m_ctx;
-    libusb_device_handle *m_handle;
-    libusb_config_descriptor *m_config;
-    struct libusb_transfer *m_inputInterruptXfer;
-    struct libusb_transfer *m_outputInterruptXfer;
-    struct libusb_transfer *m_bulkWriteXfer;
+protected:
     int m_actualBytesWritten;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_shutdown{false};
@@ -53,23 +52,9 @@ private:
     std::string m_usbPath;
     int m_interfaceNumber;
 
-    uint8_t m_interruptInEndpoint;
-    uint8_t m_interruptOutEndpoint;
-    size_t m_interruptInSize;
-    size_t m_interruptOutSize;
-    uint8_t *m_interruptInBuffer;
-    uint8_t *m_interruptOutBuffer;
-
-    uint8_t m_bulkInEndpoint;
-    uint8_t m_bulkOutEndpoint;
-    size_t m_bulkInSize;
-    size_t m_bulkOutSize;
-
     std::mutex m_writeCompleteMutex;
     std::condition_variable m_writeCompleteCV;
     std::atomic<bool> m_writeComplete = false;
-
-    int m_bulkTransferTimeout;
 
     std::function<void(USBEvent event, uint8_t *buf, size_t size)> m_usbEventCallback;
 
@@ -92,6 +77,4 @@ private:
     std::condition_variable m_cancellationCV;
 
     void CallbackWorkerThread();
-
-    static void LIBUSB_CALL HandleTransfer(struct libusb_transfer *transfer);
 };

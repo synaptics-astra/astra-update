@@ -26,6 +26,13 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         m_vendorId = std::stoi(manifest["vendor_id"].as<std::string>(), nullptr, 16);
         m_productId = std::stoi(manifest["product_id"].as<std::string>(), nullptr, 16);
 
+        m_sysMgrVendorId = 0;
+        m_sysMgrProductId = 0;
+        if (manifest["sysmgr_vendor_id"] && manifest["sysmgr_product_id"]) {
+            m_sysMgrVendorId = std::stoi(manifest["sysmgr_vendor_id"].as<std::string>(), nullptr, 16);
+            m_sysMgrProductId = std::stoi(manifest["sysmgr_product_id"].as<std::string>(), nullptr, 16);
+        }
+
         std::string secureBootString = manifest["secure_boot"].as<std::string>();
         std::transform(secureBootString.begin(), secureBootString.end(), secureBootString.begin(), ::tolower);
         m_secureBootVersion = secureBootString == "gen2" ? ASTRA_SECURE_BOOT_V2 : ASTRA_SECURE_BOOT_V3;
@@ -63,6 +70,19 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             }
         }
 
+        m_transportType = ASTRA_TRANSPORT_USB;
+        if (manifest["transport"]) {
+            std::string transportTypeString = manifest["transport"].as<std::string>();
+            std::transform(transportTypeString.begin(), transportTypeString.end(), transportTypeString.begin(), ::tolower);
+            if (transportTypeString == "usb") {
+                m_transportType = ASTRA_TRANSPORT_USB;
+            } else if (transportTypeString == "usb_cdc") {
+                m_transportType = ASTRA_TRANSPORT_USB_CDC;
+            } else {
+                throw std::runtime_error("Invalid transport type");
+            }
+        }
+
         std::string ubootVariantString = manifest["uboot"].as<std::string>();
         std::transform(ubootVariantString.begin(), ubootVariantString.end(), ubootVariantString.begin(), ::tolower);
         if (ubootVariantString == "uboot") {
@@ -78,11 +98,24 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         log(ASTRA_LOG_LEVEL_INFO) << "Secure boot version: " << (m_secureBootVersion == ASTRA_SECURE_BOOT_V2 ? "gen2" : "genx") << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Vendor ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_vendorId << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Product ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_productId << endLog;
+        if (m_sysMgrVendorId != 0 || m_sysMgrProductId != 0) {
+            log(ASTRA_LOG_LEVEL_INFO) << "SysMgr Vendor ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_sysMgrVendorId << endLog;
+            log(ASTRA_LOG_LEVEL_INFO) << "SysMgr Product ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_sysMgrProductId << endLog;
+        }
         log(ASTRA_LOG_LEVEL_INFO) << "U-Boot console: " << (m_ubootConsole == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "Transport type: " << AstraTransportToString(m_transportType) << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "uEnv support: " << (m_uEnvSupport ? "true" : "false") << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Memory layout: " << memoryLayoutString << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "DDR type: " << AstraMemoryDDRTypeToString(m_memoryDDRType) << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "U-Boot variant: " << ubootVariantString << endLog;
+
+        m_defaultBootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
+        if (manifest["boot_stage"]) {
+            std::string bootStageString = manifest["boot_stage"].as<std::string>();
+            std::transform(bootStageString.begin(), bootStageString.end(), bootStageString.begin(), ::tolower);
+            m_defaultBootStage = AstraDevice::BootStageFromString(bootStageString);
+            log(ASTRA_LOG_LEVEL_INFO) << "Boot stage: " << bootStageString << endLog;
+        }
     } catch (const YAML::BadFile& e) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Unable to open the manifest file: " << e.what() << endLog;
         return false;
@@ -143,4 +176,14 @@ bool AstraBootImage::Load()
 AstraBootImage::~AstraBootImage()
 {
     ASTRA_LOG;
+}
+
+std::vector<std::pair<uint16_t, uint16_t>> AstraBootImage::GetVendorProductIdPairs() const
+{
+    std::vector<std::pair<uint16_t, uint16_t>> pairs;
+    pairs.push_back({m_vendorId, m_productId});
+    if (m_sysMgrVendorId != 0 || m_sysMgrProductId != 0) {
+        pairs.push_back({m_sysMgrVendorId, m_sysMgrProductId});
+    }
+    return pairs;
 }

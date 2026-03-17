@@ -27,19 +27,34 @@ enum AstraDeviceStatus {
     ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL,
 };
 
+enum AstraDeviceSeries {
+    ASTRA_SERIES_SL16XX,
+    ASTRA_SERIES_SL26XX,
+    ASTRA_SERIES_SR1XX,
+};
+
+enum AstraDeviceBootStage {
+    ASTRA_DEVICE_BOOT_STAGE_AUTO,
+    ASTRA_DEVICE_BOOT_STAGE_BOOTLOADER,
+    ASTRA_DEVICE_BOOT_STAGE_LINUX,
+    ASTRA_DEVICE_BOOT_STAGE_M52BL,   // SL26XX Only
+    ASTRA_DEVICE_BOOT_STAGE_SYSMGR,  // SL26XX Only
+};
+
 class USBDevice;
 class AstraBootImage;
 class AstraDeviceManagerResponse;
+class AstraDeviceImpl;
 
 class AstraDevice
 {
 public:
-    AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly, const std::string &bootCommand);
+    AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly, const std::string &bootCommand, AstraDeviceSeries deviceSeries = ASTRA_SERIES_SL16XX);
     ~AstraDevice();
 
     void SetStatusCallback(std::function<void(AstraDeviceManagerResponse)> statusCallback);
 
-    int Boot(std::shared_ptr<AstraBootImage> bootImages);
+    int Boot(std::shared_ptr<AstraBootImage> bootImages, AstraDeviceBootStage bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO);
     int Update(std::shared_ptr<FlashImage> flashImage);
     int WaitForCompletion();
 
@@ -53,9 +68,10 @@ public:
     void Close();
 
     static const std::string AstraDeviceStatusToString(AstraDeviceStatus status);
+    static const std::string AstraDeviceSeriesToString(AstraDeviceSeries series);
+    static AstraDeviceBootStage BootStageFromString(const std::string &stage);
 
 private:
-    class AstraDeviceImpl;
     std::unique_ptr<AstraDeviceImpl> pImpl;
 };
 

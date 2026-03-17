@@ -16,7 +16,7 @@
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
-const std::string astraBootVersion = "1.1.0";
+const std::string astraBootVersion = "2.0.0-dev";
 
 // Define a struct to hold the two strings
 struct DeviceImageKey {
@@ -116,6 +116,7 @@ int main(int argc, char* argv[])
         ("boot-image", "Boot Image Path", cxxopts::value<std::string>())
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
         ("e,exit-on-error", "Exit if an error occurs when running in continuous mode", cxxopts::value<bool>()->default_value("false"))
+        ("b,boot-stage", "Target boot stage: auto, bootloader, linux, m52bl, sysmgr", cxxopts::value<std::string>()->default_value("auto"))
         ("v,version", "Print version");
 
     options.parse_positional({"boot-image"});
@@ -157,6 +158,9 @@ int main(int argc, char* argv[])
     bool simpleProgress = result["simple-progress"].as<bool>();
     std::string bootCommand = result["boot-command"].as<std::string>();
     std::string filterPorts = result["port"].as<std::string>();
+    std::string bootStageStr = result["boot-stage"].as<std::string>();
+
+    AstraDeviceBootStage bootStage = AstraDevice::BootStageFromString(bootStageStr);
 
     if (usbDebug) {
         // Use simple progress when USB debugging is enabled
@@ -180,7 +184,7 @@ int main(int argc, char* argv[])
     AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);
 
     try {
-        deviceManager.Boot(bootImagePath, bootCommand);
+        deviceManager.Boot(bootImagePath, bootCommand, bootStage);
      } catch (const std::exception& e) {
         std::cerr << "Failed to initialize boot: " << e.what() << std::endl;
         return -1;

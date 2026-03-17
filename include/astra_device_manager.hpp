@@ -12,7 +12,7 @@
 #include "flash_image.hpp"
 #include "astra_log.hpp"
 
-#define ASTRA_DEVICE_MANAGER_VERSION "1.1.0"
+#define ASTRA_DEVICE_MANAGER_VERSION "2.0.0-dev"
 
 enum AstraDeviceManagerStatus {
     ASTRA_DEVICE_MANAGER_STATUS_START,
@@ -39,7 +39,7 @@ public:
     ~AstraDeviceManager();
 
     void Update(std::shared_ptr<FlashImage> flashImage, std::string bootImagePath);
-    void Boot(std::string bootImagesPath, std::string bootCommand = "");
+    void Boot(std::string bootImagesPath, std::string bootCommand = "", AstraDeviceBootStage bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO);
     bool Shutdown();
     std::string GetLogFile() const;
 
