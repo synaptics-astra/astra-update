@@ -187,14 +187,18 @@ PYBIND11_MODULE(astra_update, m) {
 
     // FlashImage static factory methods
     py::class_<FlashImage, std::shared_ptr<FlashImage>>(m, "FlashImage")
-        .def_static("flash_image_factory", 
-            [](const std::string& imagePath, const std::string& configPath = "", const std::string& manifestPath = "") -> std::shared_ptr<FlashImage> {
-                return FlashImage::FlashImageFactory(imagePath, configPath, manifestPath);
+        .def_static("flash_image_factory",
+            [](const std::string& imagePath,
+               std::map<std::string, std::string> config,
+               const std::string& manifest = "") -> std::shared_ptr<FlashImage> {
+                return FlashImage::FlashImageFactory(imagePath, config, manifest);
             },
             py::arg("image_path"),
-            py::arg("config_path") = "",
-            py::arg("manifest_path") = "",
-            "Factory method to create a FlashImage from file");
+            py::arg("config") = std::map<std::string, std::string>{},
+            py::arg("manifest") = "",
+            "Factory method to create a FlashImage from file.\n"
+            "config is a dict of key/value overrides, e.g.:\n"
+            "  board, chip, image_type, boot_image, secure_boot, memory_layout, ddr_type, reset");
 
     // ResponseQueue access for Python
     py::class_<ResponseQueue>(m, "ResponseQueue")

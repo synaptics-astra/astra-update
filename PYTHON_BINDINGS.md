@@ -128,11 +128,11 @@ mgr.shutdown()
 ```python
 from astra_update.images import load_flash_image, load_spi_flash_image
 
-# Load flash images
+# Load flash image with optional config overrides and manifest path
 flash_image = load_flash_image(
     image_path="firmware.bin",
-    config_path="config.yaml",
-    manifest_path="manifest.yaml"
+    config={"board": "sl1680", "chip": "sl1680", "image_type": "emmc"},
+    manifest="/path/to/manifest.yaml"
 )
 
 # Update devices
