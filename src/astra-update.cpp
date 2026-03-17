@@ -16,7 +16,7 @@
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
-const std::string astraUpdateVersion = "1.1.0";
+const std::string astraUpdateVersion = "2.0.0-dev";
 
 // Define a struct to hold the two strings
 struct DeviceImageKey {

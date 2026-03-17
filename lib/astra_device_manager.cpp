@@ -6,18 +6,23 @@
 #include <memory>
 #include <thread>
 #include <mutex>
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <condition_variable>
 #include "astra_device.hpp"
 #include "astra_device_manager.hpp"
 #include "boot_image_collection.hpp"
-#include "usb_transport.hpp"
+#include "libusb_transport.hpp"
+#include "posix_usb_cdc_transport.hpp"
+#include "usb_cdc_transport.hpp"
 #include "image.hpp"
 #include "astra_log.hpp"
 #include "utils.hpp"
 
 #if PLATFORM_WINDOWS
-#include "win_usb_transport.hpp"
+#include "win_libusb_transport.hpp"
+#include "win_usb_cdc_transport.hpp"
 #endif
 
 class AstraDeviceManager::AstraDeviceManagerImpl {
@@ -25,9 +30,9 @@ public:
     AstraDeviceManagerImpl(std::function<void(AstraDeviceManagerResponse)> responseCallback,
         bool runContinuously,
         AstraLogLevel minLogLevel, const std::string &logPath,
-        const std::string &tempDir, const std::string &filterPorts, bool usbDebug)
+                const std::string &tempDir, const std::string &filterPorts, bool usbDebug)
         : m_responseCallback{responseCallback}, m_runContinuously{runContinuously}, m_filterPorts{filterPorts},
-          m_usbDebug{usbDebug}
+                    m_usbDebug{usbDebug}
     {
         if (tempDir.empty()) {
             m_tempDir = MakeTempDirectory();
@@ -103,12 +108,13 @@ public:
         Init();
     }
 
-    void Boot(std::string bootImagePath, std::string bootCommand)
+    void Boot(std::string bootImagePath, std::string bootCommand, AstraDeviceBootStage bootStage)
     {
         ASTRA_LOG;
 
         m_managerMode = ASTRA_DEVICE_MANAGER_MODE_BOOT;
         m_bootCommand = bootCommand;
+        m_bootStage = bootStage;
 
         AstraBootImage bootImage{bootImagePath};
         if (!bootImage.Load()) {
@@ -116,6 +122,11 @@ public:
         }
 
         m_bootImage = std::make_shared<AstraBootImage>(bootImage);
+
+        // Allow manifest to set default stage; CLI overrides it.
+        if (m_bootStage == ASTRA_DEVICE_BOOT_STAGE_AUTO && m_bootImage->GetDefaultBootStage() != ASTRA_DEVICE_BOOT_STAGE_AUTO) {
+            m_bootStage = m_bootImage->GetDefaultBootStage();
+        }
 
         Init();
     }
@@ -164,12 +175,31 @@ private:
     bool m_runContinuously = false;
     bool m_deviceFound = false;
     bool m_usbDebug = false;
+    AstraTransportType m_transportType = ASTRA_TRANSPORT_USB;
+    AstraDeviceSeries m_deviceSeries = ASTRA_SERIES_SL16XX;
+    AstraDeviceBootStage m_bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
     bool m_failureReported = false;
     std::string m_modifiedLogPath;
     std::string m_filterPorts;
+    std::atomic<bool> m_completed{false};
 
     std::vector<std::shared_ptr<AstraDevice>> m_devices;
     std::mutex m_devicesMutex;
+
+    static AstraDeviceSeries DetectDeviceSeries(const std::string &chipName)
+    {
+        std::string chipNameLower = chipName;
+        std::transform(chipNameLower.begin(), chipNameLower.end(), chipNameLower.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        if (chipNameLower.rfind("sl26", 0) == 0) {
+            return ASTRA_SERIES_SL26XX;
+        }
+        if (chipNameLower.rfind("sr1", 0) == 0) {
+            return ASTRA_SERIES_SR1XX;
+        }
+        return ASTRA_SERIES_SL16XX;
+    }
 
     void Init()
     {
@@ -183,21 +213,39 @@ private:
         bootImageDescription += "    Secure Boot: " + AstraSecureBootVersionToString(m_bootImage->GetSecureBootVersion()) + "\n";
         bootImageDescription += "    Memory Layout: " + AstraMemoryLayoutToString(m_bootImage->GetMemoryLayout()) + "\n";
         bootImageDescription += "    Memory DDR Type: " + AstraMemoryDDRTypeToString(m_bootImage->GetMemoryDDRType()) + "\n";
+
+        m_deviceSeries = DetectDeviceSeries(m_bootImage->GetChipName());
+
+        bootImageDescription += "    Device Series: " + AstraDevice::AstraDeviceSeriesToString(m_deviceSeries) + "\n";
+        bootImageDescription += "    Transport Type: " + AstraTransportToString(m_bootImage->GetTransportType()) + "\n";
         bootImageDescription += "    U-Boot Console: " + std::string(m_bootImage->GetUbootConsole() == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") + "\n";
-        bootImageDescription += "    uEnt.txt Support: " + std::string(m_bootImage->GetUEnvSupport() ? "enabled" : "disabled") + "\n";
+        bootImageDescription += "    uEnv.txt Support: " + std::string(m_bootImage->GetUEnvSupport() ? "enabled" : "disabled") + "\n";
         bootImageDescription += "    U-Boot Variant: " + std::string(m_bootImage->GetUbootVariant() == ASTRA_UBOOT_VARIANT_UBOOT ? "U-Boot" : "Synaptics U-Boot");
         ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_INFO, bootImageDescription}});
 
-        uint16_t vendorId = m_bootImage->GetVendorId();
-        uint16_t productId = m_bootImage->GetProductId();
+        std::vector<USBVendorProductId> vendorProductIds = m_bootImage->GetVendorProductIdPairs();
+
+        m_transportType = m_bootImage->GetTransportType();
 
 #if PLATFORM_WINDOWS
-        m_transport = std::make_shared<WinUSBTransport>(m_usbDebug);
+        if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+            m_transport = std::make_shared<WinUSBCDCTransport>(m_usbDebug);
+        } else {
+            m_transport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
+        }
 #else
-        m_transport = std::make_shared<USBTransport>(m_usbDebug);
+        if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+            m_transport = std::make_shared<PosixUSBCDCTransport>(m_usbDebug);
+        } else {
+            m_transport = std::make_shared<LibUSBTransport>(m_usbDebug);
+        }
 #endif
 
-        if (m_transport->Init(vendorId, productId, m_filterPorts,
+        log(ASTRA_LOG_LEVEL_INFO) << "Using USB transport: "
+            << (m_transportType == ASTRA_TRANSPORT_USB_CDC ? "cdc" : "usb") << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "Using device series implementation: " << AstraDevice::AstraDeviceSeriesToString(m_deviceSeries) << endLog;
+
+        if (m_transport->Init(vendorProductIds, m_filterPorts,
                 std::bind(&AstraDeviceManagerImpl::DeviceAddedCallback, this, std::placeholders::_1)) < 0)
         {
             throw std::runtime_error("Failed to initialize USB transport");
@@ -206,7 +254,11 @@ private:
         log(ASTRA_LOG_LEVEL_DEBUG) << "USB transport initialized successfully" << endLog;
 
         std::ostringstream os;
-        os << "Waiting for Astra Device (" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << vendorId << ":" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << productId << ")";
+        os << "Waiting for Astra Device(s):";
+        for (const auto& [vid, pid] : vendorProductIds) {
+            os << " (" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << vid
+               << ":" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << pid << ")";
+        }
         ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_START, os.str()}});
     }
 
@@ -248,7 +300,7 @@ private:
             astraDevice->SetStatusCallback(m_responseCallback);
 
             log(ASTRA_LOG_LEVEL_DEBUG) << "Calling boot" << endLog;
-            int ret = astraDevice->Boot(m_bootImage);
+            int ret = astraDevice->Boot(m_bootImage, m_bootStage);
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to boot device" << endLog;
                 m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
@@ -256,6 +308,19 @@ private:
                     m_transport->UnblockDeviceEnumeration();
                 }
                 ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
+                return;
+            }
+
+            if (ret > 0) {
+                // Boot in progress — device sent Run Image and is resetting.
+                // Close this instance and release the enumeration lock so the
+                // re-enumerated device is picked up by DeviceAddedCallback.
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Boot in progress, device will re-enumerate" << endLog;
+                astraDevice->Close();
+                m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
+                if (enumerationBlocked) {
+                    m_transport->UnblockDeviceEnumeration();
+                }
                 return;
             }
 
@@ -294,12 +359,24 @@ private:
                 ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_SHUTDOWN, "Astra Device Manager shutting down"}});
             }
 
+            const bool terminalSuccess =
+                (status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE || status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
+            if (terminalSuccess) {
+                // Gate DeviceAddedCallback before Close() can trigger WM_DEVICECHANGE
+                // that would re-discover the still-connected device.
+                m_completed.store(true);
+            }
+
             astraDevice->Close();
 
-            // Remove device from active devices set to allow re-detection after reset
-            m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
+            if (!terminalSuccess || m_runContinuously) {
+                // Allow re-detection after an intermediate reset (e.g. bootrom → m52bl),
+                // and after a successful boot/update in continuous mode so the next
+                // device on the same USB port is not blocked by the active-device set.
+                m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
+            }
 
-            // Unblock device enumeration after boot/update completes
+            // Always release the enumeration mutex so ProcessPendingDevices can run.
             if (enumerationBlocked) {
                 m_transport->UnblockDeviceEnumeration();
             }
@@ -310,10 +387,15 @@ private:
     {
         ASTRA_LOG;
 
+        if (!m_runContinuously && m_completed.load()) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Boot/update already completed, ignoring spurious device arrival" << endLog;
+            return;
+        }
+
         log(ASTRA_LOG_LEVEL_DEBUG) << "Device added AstraDeviceManagerImpl::DeviceAddedCallback" << endLog;
 
         std::shared_ptr<AstraDevice> astraDevice = std::make_shared<AstraDevice>(std::move(device), m_tempDir,
-            m_managerMode == ASTRA_DEVICE_MANAGER_MODE_BOOT, m_bootCommand);
+            m_managerMode == ASTRA_DEVICE_MANAGER_MODE_BOOT, m_bootCommand, m_deviceSeries);
 
         std::lock_guard<std::mutex> lock(m_devicesMutex);
         m_deviceFound = true;
@@ -339,9 +421,9 @@ void AstraDeviceManager::Update(std::shared_ptr<FlashImage> flashImage, std::str
     pImpl->Update(flashImage, bootImagePath);
 }
 
-void AstraDeviceManager::Boot(std::string bootImagesPath, std::string bootCommand)
+void AstraDeviceManager::Boot(std::string bootImagesPath, std::string bootCommand, AstraDeviceBootStage bootStage)
 {
-    pImpl->Boot(bootImagesPath, bootCommand);
+    pImpl->Boot(bootImagesPath, bootCommand, bootStage);
 }
 
 bool AstraDeviceManager::Shutdown()

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Synaptics Incorporated
 
-#include "win_usb_transport.hpp"
+#include "win_libusb_transport.hpp"
 #include "astra_log.hpp"
 #include <initguid.h>
 #include <devpkey.h>
 #include <usbiodef.h>
 
-WinUSBTransport::~WinUSBTransport()
+WinLibUSBTransport::~WinLibUSBTransport()
 {
     ASTRA_LOG;
     Shutdown();
@@ -18,12 +18,11 @@ WinUSBTransport::~WinUSBTransport()
     }
 }
 
-int WinUSBTransport::Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback)
+int WinLibUSBTransport::Init(std::vector<USBVendorProductId> vendorProductIds, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback)
 {
     ASTRA_LOG;
 
-    m_vendorId = vendorId;
-    m_productId = productId;
+    m_supportedDevices = vendorProductIds;
 
     m_filterPorts = ParseFilterPortString(filterPorts);
 
@@ -57,16 +56,16 @@ int WinUSBTransport::Init(uint16_t vendorId, uint16_t productId, const std::stri
 
     // Start device enumeration worker thread
     m_enumerationThreadRunning.store(true);
-    m_deviceEnumerationThread = std::thread(&WinUSBTransport::DeviceEnumerationWorker, this);
+    m_deviceEnumerationThread = std::thread(&WinLibUSBTransport::DeviceEnumerationWorker, this);
 
-    m_hotplugThread = std::thread(&WinUSBTransport::RunHotplugHandler, this);
+    m_hotplugThread = std::thread(&WinLibUSBTransport::RunHotplugHandler, this);
 
     StartDeviceMonitor();
 
     return ret;
 }
 
-void WinUSBTransport::Shutdown()
+void WinLibUSBTransport::Shutdown()
 {
     ASTRA_LOG;
 
@@ -96,12 +95,12 @@ void WinUSBTransport::Shutdown()
     }
 }
 
-void WinUSBTransport::RunHotplugHandler()
+void WinLibUSBTransport::RunHotplugHandler()
 {
     ASTRA_LOG;
 
     WNDCLASS wc = { 0 };
-    wc.lpfnWndProc = WinUSBTransport::WndProc;
+    wc.lpfnWndProc = WinLibUSBTransport::WndProc;
     wc.hInstance = GetModuleHandle(nullptr);
     wc.lpszClassName = TEXT("AstraDeviceManager");
 
@@ -138,12 +137,12 @@ void WinUSBTransport::RunHotplugHandler()
     }
 }
 
-LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK WinLibUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     ASTRA_LOG;
 
     if (message == WM_DEVICECHANGE) {
-        WinUSBTransport* handler = reinterpret_cast<WinUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+        WinLibUSBTransport* handler = reinterpret_cast<WinLibUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
         if (wParam == DBT_DEVICEARRIVAL) {
             PDEV_BROADCAST_HDR pHdr = reinterpret_cast<PDEV_BROADCAST_HDR>(lParam);
@@ -162,7 +161,7 @@ LRESULT CALLBACK WinUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam
     return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
-void WinUSBTransport::OnDeviceArrived()
+void WinLibUSBTransport::OnDeviceArrived()
 {
     ASTRA_LOG;
 
@@ -172,7 +171,7 @@ void WinUSBTransport::OnDeviceArrived()
     m_pendingDevicesCV.notify_one();
 }
 
-void WinUSBTransport::DeviceEnumerationWorker()
+void WinLibUSBTransport::DeviceEnumerationWorker()
 {
     ASTRA_LOG;
 
@@ -195,7 +194,7 @@ void WinUSBTransport::DeviceEnumerationWorker()
     }
 }
 
-void WinUSBTransport::ProcessPendingDevices()
+void WinLibUSBTransport::ProcessPendingDevices()
 {
     ASTRA_LOG;
 
@@ -251,7 +250,14 @@ void WinUSBTransport::ProcessPendingDevices()
                 continue;
             }
 
-            if (desc.idVendor == m_vendorId && desc.idProduct == m_productId) {
+            bool vidPidMatches = false;
+            for (const auto& [vid, pid] : m_supportedDevices) {
+                if (desc.idVendor == vid && desc.idProduct == pid) {
+                    vidPidMatches = true;
+                    break;
+                }
+            }
+            if (vidPidMatches) {
                 // Check if we've already opened this device in this process
                 {
                     std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
@@ -283,7 +289,7 @@ void WinUSBTransport::ProcessPendingDevices()
                 }
 
                 retry = false;
-                std::unique_ptr<USBDevice> usbDevice = std::make_unique<USBDevice>(device, usbPath, m_ctx, handle);
+                std::unique_ptr<USBDevice> usbDevice = std::make_unique<LibUSBDevice>(device, usbPath, m_ctx, handle);
 
                 // Add to active devices set to prevent duplicate opens
                 {
@@ -322,7 +328,7 @@ void WinUSBTransport::ProcessPendingDevices()
     }
 }
 
-bool WinUSBTransport::BlockDeviceEnumeration()
+bool WinLibUSBTransport::BlockDeviceEnumeration()
 {
     ASTRA_LOG;
 
@@ -349,7 +355,7 @@ bool WinUSBTransport::BlockDeviceEnumeration()
     }
 }
 
-void WinUSBTransport::UnblockDeviceEnumeration()
+void WinLibUSBTransport::UnblockDeviceEnumeration()
 {
     ASTRA_LOG;
 
@@ -363,7 +369,7 @@ void WinUSBTransport::UnblockDeviceEnumeration()
     }
 }
 
-void WinUSBTransport::RemoveActiveDevice(const std::string& usbPath)
+void WinLibUSBTransport::RemoveActiveDevice(const std::string& usbPath)
 {
     ASTRA_LOG;
 
