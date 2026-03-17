@@ -140,7 +140,15 @@ PYBIND11_MODULE(astra_update, m) {
 
     // AstraDeviceManager class
     py::class_<AstraDeviceManager, std::shared_ptr<AstraDeviceManager>>(m, "AstraDeviceManager")
-        .def(py::init<bool, AstraLogLevel, const std::string&, const std::string&, const std::string&, bool>(),
+        .def(py::init([](bool continuous,
+                         AstraLogLevel logLevel,
+                         const std::string& logPath,
+                         const std::string& tempDir,
+                         const std::string& filterPorts,
+                         bool usbDebug) {
+                return std::make_shared<AstraDeviceManager>(
+                    ResponseQueueCallback, continuous, logLevel, logPath, tempDir, filterPorts, usbDebug);
+             }),
             py::arg("continuous") = false,
             py::arg("log_level") = ASTRA_LOG_LEVEL_WARNING,
             py::arg("log_path") = "",
