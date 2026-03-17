@@ -278,7 +278,7 @@ cmake --build . --config Release
 
 Then ensure it's in Python path:
 ```bash
-export PYTHONPATH=/path/to/build_py/lib:$PYTHONPATH
+export PYTHONPATH=/path/to/astra-update/src:$PYTHONPATH
 python -m pytest tests/
 ```
 
