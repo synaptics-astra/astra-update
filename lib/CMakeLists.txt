@@ -16,6 +16,8 @@ ExternalProject_Add(yaml-cpp
     GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
     GIT_TAG yaml-cpp-0.7.0
     PREFIX ${CMAKE_BINARY_DIR}/yaml-cpp
+    PATCH_COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_BINARY_DIR}/yaml-cpp/src/yaml-cpp 
+                                   -P ${CMAKE_SOURCE_DIR}/patches/yaml-cpp-cstdint.cmake
     CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/yaml-cpp
                -DYAML_CPP_BUILD_TESTS=OFF
