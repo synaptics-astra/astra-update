@@ -9,6 +9,7 @@ ExternalProject_Add(libusb
                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/libusb
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+               -DCMAKE_C_FLAGS=-D_GNU_SOURCE
 )
 
 ExternalProject_Add(yaml-cpp

@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <cstring>
+#include <algorithm>
 
 #include "astra_device.hpp"
 #include "astra_device_manager.hpp"
@@ -61,7 +62,7 @@ public:
         log(ASTRA_LOG_LEVEL_INFO) << "Device name: " << m_deviceName << endLog;
 
         std::string modifiedDeviceName = m_deviceName;
-        std::remove(modifiedDeviceName.begin(), modifiedDeviceName.end(), ':');
+        modifiedDeviceName.erase(std::remove(modifiedDeviceName.begin(), modifiedDeviceName.end(), ':'), modifiedDeviceName.end());
         std::replace(modifiedDeviceName.begin(), modifiedDeviceName.end(), '.', '_');
 
         m_deviceDir = m_tempDir + "/" + modifiedDeviceName;
