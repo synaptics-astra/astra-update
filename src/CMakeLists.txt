@@ -4,7 +4,11 @@ ExternalProject_Add(cxxopts
     GIT_REPOSITORY https://github.com/jarro2783/cxxopts.git
     GIT_TAG v3.0.0
     PREFIX ${CMAKE_BINARY_DIR}/cxxopts
+    PATCH_COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_BINARY_DIR}/cxxopts/src/cxxopts
+                                   -P ${CMAKE_SOURCE_DIR}/patches/cxxopts-cstdint.cmake
     CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/cxxopts
+               -DCXXOPTS_BUILD_EXAMPLES=OFF
+               -DCXXOPTS_BUILD_TESTS=OFF
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
 )
