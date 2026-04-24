@@ -23,7 +23,7 @@ ExternalProject_Add(yaml-cpp
                -DYAML_CPP_BUILD_TESTS=OFF
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
-               -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+               -DCMAKE_POLICY_VERSION_MINIMUM=3.10
 )
 
 file(GLOB SRC astra_boot_image.cpp
