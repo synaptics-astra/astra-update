@@ -9,17 +9,21 @@ ExternalProject_Add(libusb
                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/libusb
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+               -DCMAKE_C_FLAGS=-D_GNU_SOURCE
 )
 
 ExternalProject_Add(yaml-cpp
     GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
     GIT_TAG yaml-cpp-0.7.0
     PREFIX ${CMAKE_BINARY_DIR}/yaml-cpp
+    PATCH_COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_BINARY_DIR}/yaml-cpp/src/yaml-cpp 
+                                   -P ${CMAKE_SOURCE_DIR}/cmake/yaml-cpp-cstdint.cmake
     CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/yaml-cpp
                -DYAML_CPP_BUILD_TESTS=OFF
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+               -DCMAKE_POLICY_VERSION_MINIMUM=3.10
 )
 
 file(GLOB SRC astra_boot_image.cpp
