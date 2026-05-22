@@ -72,6 +72,18 @@ void AstraDevice::Close()
     pImpl->Close();
 }
 
+void AstraDevice::Rebind(std::unique_ptr<USBDevice> device)
+{
+    pImpl->Rebind(std::move(device));
+}
+
+void AstraDevice::SetRegistrationCallbacks(
+    std::function<void(const std::string &)> registerFn,
+    std::function<void(const std::string &)> unregisterFn)
+{
+    pImpl->SetRegistrationCallbacks(std::move(registerFn), std::move(unregisterFn));
+}
+
 const std::string AstraDevice::AstraDeviceStatusToString(AstraDeviceStatus status)
 {
     static const std::string statusStrings[] = {

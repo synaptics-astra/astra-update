@@ -34,6 +34,7 @@ public:
     void Close() override;
 
     int Write(uint8_t *data, size_t size, int *transferred) override;
+    int ReadBulk(uint8_t *data, size_t size, int *transferred, int timeoutMs = 5000) override;
 
     int WriteInterruptData(const uint8_t *data, size_t size) override;
     uint16_t GetVendorId() const override;

@@ -58,11 +58,6 @@ int LibUSBTransport::Init(std::vector<USBVendorProductId> vendorProductIds, cons
 
     m_supportedDevices = vendorProductIds;
 
-    // Currently devices using libusb only have one vendor and product id. Only use the first pair for hotplug registration
-    // to avoid unnecessary calls of HotplugEventCallback.
-    uint16_t vendorId = m_supportedDevices.front().first;
-    uint16_t productId = m_supportedDevices.front().second;
-
     m_filterPorts = ParseFilterPortString(filterPorts);
 
     int ret = libusb_init(&m_ctx);
@@ -80,18 +75,27 @@ int LibUSBTransport::Init(std::vector<USBVendorProductId> vendorProductIds, cons
     if (libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
         log(ASTRA_LOG_LEVEL_DEBUG) << "Hotplug is supported" << endLog;
 
-        ret = libusb_hotplug_register_callback(m_ctx,
-                                                LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
-                                                LIBUSB_HOTPLUG_ENUMERATE,
-                                                vendorId,
-                                                productId,
-                                                LIBUSB_HOTPLUG_MATCH_ANY,
-                                                HotplugEventCallback,
-                                                this,
-                                                &m_callbackHandle);
-        if (ret != LIBUSB_SUCCESS) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to register hotplug callback: " << libusb_error_name(ret) << endLog;
+        for (const auto& [vid, pid] : m_supportedDevices) {
+            libusb_hotplug_callback_handle handle = 0;
+            ret = libusb_hotplug_register_callback(m_ctx,
+                                                    LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+                                                    LIBUSB_HOTPLUG_ENUMERATE,
+                                                    vid,
+                                                    pid,
+                                                    LIBUSB_HOTPLUG_MATCH_ANY,
+                                                    HotplugEventCallback,
+                                                    this,
+                                                    &handle);
+            if (ret == LIBUSB_SUCCESS) {
+                m_callbackHandles.push_back(handle);
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to register hotplug callback for VID:0x"
+                    << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << vid
+                    << " PID:0x" << std::setw(4) << std::setfill('0') << pid << std::dec
+                    << ": " << libusb_error_name(ret) << endLog;
+            }
         }
+        ret = m_callbackHandles.empty() ? LIBUSB_ERROR_NOT_FOUND : LIBUSB_SUCCESS;
 
     } else {
         log(ASTRA_LOG_LEVEL_DEBUG) << "Hotplug is NOT supported" << endLog;
@@ -108,10 +112,10 @@ void LibUSBTransport::Shutdown()
 
     std::lock_guard<std::mutex> lock(m_shutdownMutex);
     if (m_running.exchange(false)) {
-        if (m_callbackHandle) {
-            libusb_hotplug_deregister_callback(m_ctx, m_callbackHandle);
-            m_callbackHandle = 0;
+        for (auto h : m_callbackHandles) {
+            libusb_hotplug_deregister_callback(m_ctx, h);
         }
+        m_callbackHandles.clear();
 
         libusb_interrupt_event_handler(m_ctx);
         if (m_deviceMonitorThread.joinable()) {

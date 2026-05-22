@@ -13,9 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
-#include <map>
 #include <optional>
-#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -23,8 +21,8 @@
 #include <vector>
 
 #include "astra_boot_image.hpp"
+#include "fastboot_device.hpp"
 #include "usb_cdc_device.hpp"
-#include <zlib.h>
 
 namespace {
 
@@ -39,7 +37,6 @@ constexpr uint8_t kHostApiServiceId = 0x0D;
 constexpr uint8_t kOpcodeVersion = 0x0A;
 constexpr uint8_t kOpcodeRunImage = 0x0B;
 constexpr uint8_t kOpcodeExec0C = 0x0C;
-constexpr uint8_t kOpcodeEmmcOp = 0x0F;
 constexpr uint8_t kOpcodeUpload = 0x12;
 
 constexpr uint8_t kOpcodeUploadKey = 0x01;
@@ -47,7 +44,6 @@ constexpr uint8_t kOpcodeUploadSpk = 0x02;
 constexpr uint8_t kOpcodeUploadM52Bl = 0x04;
 
 constexpr uint8_t kHostApiOpcodeGeneric = 0x12;
-constexpr uint8_t kHostApiOpcodeEmmc = 0x0F;
 constexpr uint8_t kHostApiOpcodeVersion = 0x0A;
 constexpr uint8_t kHostApiOpcodeExec = 0x0C;
 
@@ -56,25 +52,9 @@ constexpr uint32_t kAddrAcLoad = 0xBA100000;
 
 constexpr uint32_t kImgTypeBl = 0x00020017;
 constexpr uint32_t kImgTypeSm = 0x00000012;
-constexpr uint32_t kImgTypeGpt = 0x00000010;
 constexpr uint32_t kImgTypeOptee = 0x00020014;
 
-constexpr uint32_t kBlockSize = 512;
-constexpr uint64_t kMbSize = 1024ULL * 1024ULL;
-constexpr uint64_t kChunkSizeMb = 32;
-constexpr uint64_t kLargeFileThresholdMb = 100;
 constexpr size_t kStreamChunkSize = 3 * 1024 * 1024;
-
-constexpr uint32_t kPartEntries = 128;
-constexpr uint32_t kPartEntrySize = 128;
-constexpr uint32_t kGptTableSize = 0x4000;
-constexpr uint32_t kGptHeaderSize = 92;
-constexpr uint32_t kGptRevision = 0x00010000;
-
-const std::array<uint8_t, 16> kPartTypeGuidCanonical = {
-    0xEB, 0xD0, 0xA0, 0xA2, 0xB9, 0xE5, 0x44, 0x33,
-    0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
-};
 
 enum M52BLReturnCode {
     M52BL_RC_SUCCESS             = 0x00000000,
@@ -92,28 +72,8 @@ enum class SL26XXDeviceMode {
     SL26XX_DEVICE_MODE_BOOTROM,
     SL26XX_DEVICE_MODE_M52BL,
     SL26XX_DEVICE_MODE_SYSMGR,
+    SL26XX_DEVICE_MODE_FASTBOOT,
 };
-
-struct EmmcPartitionDesc {
-    std::string name;
-    uint64_t startMb;
-    uint64_t sizeMb;
-};
-
-std::string Trim(const std::string &value)
-{
-    size_t start = 0;
-    while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
-        ++start;
-    }
-
-    size_t end = value.size();
-    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
-        --end;
-    }
-
-    return value.substr(start, end - start);
-}
 
 std::string ToLower(std::string value)
 {
@@ -121,17 +81,6 @@ std::string ToLower(std::string value)
         return static_cast<char>(std::tolower(c));
     });
     return value;
-}
-
-std::vector<std::string> SplitByComma(const std::string &line)
-{
-    std::vector<std::string> parts;
-    std::stringstream ss(line);
-    std::string token;
-    while (std::getline(ss, token, ',')) {
-        parts.push_back(Trim(token));
-    }
-    return parts;
 }
 
 void AppendU32LE(std::vector<uint8_t> &buffer, uint32_t value)
@@ -142,13 +91,6 @@ void AppendU32LE(std::vector<uint8_t> &buffer, uint32_t value)
     buffer.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
 }
 
-void AppendU64LE(std::vector<uint8_t> &buffer, uint64_t value)
-{
-    for (int i = 0; i < 8; ++i) {
-        buffer.push_back(static_cast<uint8_t>((value >> (i * 8)) & 0xFF));
-    }
-}
-
 uint32_t ReadU32LE(const uint8_t *ptr)
 {
     return static_cast<uint32_t>(ptr[0]) |
@@ -157,236 +99,20 @@ uint32_t ReadU32LE(const uint8_t *ptr)
         (static_cast<uint32_t>(ptr[3]) << 24);
 }
 
-uint32_t ComputeCRC32(const uint8_t *data, size_t length)
+// Returns true if s looks like the 32-char hex UUID we write into uEnv.txt.
+bool IsAstraUuid(const std::string &s)
 {
-    static std::array<uint32_t, 256> table = []() {
-        std::array<uint32_t, 256> t = {};
-        for (uint32_t i = 0; i < 256; ++i) {
-            uint32_t c = i;
-            for (size_t j = 0; j < 8; ++j) {
-                c = (c & 1U) != 0U ? (0xEDB88320U ^ (c >> 1)) : (c >> 1);
-            }
-            t[i] = c;
+    if (s.size() != 32) {
+        return false;
+    }
+    for (char c : s) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) {
+            return false;
         }
-        return t;
-    }();
-
-    uint32_t crc = 0xFFFFFFFFU;
-    for (size_t i = 0; i < length; ++i) {
-        crc = table[(crc ^ data[i]) & 0xFFU] ^ (crc >> 8);
     }
-    return crc ^ 0xFFFFFFFFU;
+    return true;
 }
 
-std::array<uint8_t, 16> MakeRandomUuidCanonical()
-{
-    std::array<uint8_t, 16> uuid = {};
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<int> dist(0, 255);
-
-    for (auto &b : uuid) {
-        b = static_cast<uint8_t>(dist(gen));
-    }
-
-    // UUIDv4
-    uuid[6] = static_cast<uint8_t>((uuid[6] & 0x0F) | 0x40);
-    uuid[8] = static_cast<uint8_t>((uuid[8] & 0x3F) | 0x80);
-    return uuid;
-}
-
-std::array<uint8_t, 16> UuidToGptBytes(const std::array<uint8_t, 16> &uuidCanonical)
-{
-    std::array<uint8_t, 16> out = {};
-
-    out[0] = uuidCanonical[3];
-    out[1] = uuidCanonical[2];
-    out[2] = uuidCanonical[1];
-    out[3] = uuidCanonical[0];
-
-    out[4] = uuidCanonical[5];
-    out[5] = uuidCanonical[4];
-
-    out[6] = uuidCanonical[7];
-    out[7] = uuidCanonical[6];
-
-    for (size_t i = 8; i < 16; ++i) {
-        out[i] = uuidCanonical[i];
-    }
-
-    return out;
-}
-
-std::vector<uint8_t> BuildProtectiveMbr()
-{
-    std::vector<uint8_t> mbr(kBlockSize, 0);
-
-    const size_t entryOffset = 0x1BE;
-    mbr[entryOffset + 0] = 0x00;
-    mbr[entryOffset + 1] = 0x00;
-    mbr[entryOffset + 2] = 0x02;
-    mbr[entryOffset + 3] = 0x00;
-    mbr[entryOffset + 4] = 0xEE;
-    mbr[entryOffset + 5] = 0xFF;
-    mbr[entryOffset + 6] = 0xFF;
-    mbr[entryOffset + 7] = 0xFF;
-
-    const uint32_t firstLba = 1;
-    const uint32_t lbaSize = 0xFFFFFFFFU;
-    mbr[entryOffset + 8] = static_cast<uint8_t>(firstLba & 0xFF);
-    mbr[entryOffset + 9] = static_cast<uint8_t>((firstLba >> 8) & 0xFF);
-    mbr[entryOffset + 10] = static_cast<uint8_t>((firstLba >> 16) & 0xFF);
-    mbr[entryOffset + 11] = static_cast<uint8_t>((firstLba >> 24) & 0xFF);
-
-    mbr[entryOffset + 12] = static_cast<uint8_t>(lbaSize & 0xFF);
-    mbr[entryOffset + 13] = static_cast<uint8_t>((lbaSize >> 8) & 0xFF);
-    mbr[entryOffset + 14] = static_cast<uint8_t>((lbaSize >> 16) & 0xFF);
-    mbr[entryOffset + 15] = static_cast<uint8_t>((lbaSize >> 24) & 0xFF);
-
-    mbr[510] = 0x55;
-    mbr[511] = 0xAA;
-    return mbr;
-}
-
-std::vector<uint8_t> BuildPartitionEntry(const std::string &name, uint64_t startLba, uint64_t endLba)
-{
-    std::vector<uint8_t> entry(kPartEntrySize, 0);
-
-    const std::array<uint8_t, 16> partTypeGuid = UuidToGptBytes(kPartTypeGuidCanonical);
-    const std::array<uint8_t, 16> partGuid = UuidToGptBytes(MakeRandomUuidCanonical());
-
-    std::copy(partTypeGuid.begin(), partTypeGuid.end(), entry.begin());
-    std::copy(partGuid.begin(), partGuid.end(), entry.begin() + 16);
-
-    for (size_t i = 0; i < 8; ++i) {
-        entry[32 + i] = static_cast<uint8_t>((startLba >> (i * 8)) & 0xFF);
-        entry[40 + i] = static_cast<uint8_t>((endLba >> (i * 8)) & 0xFF);
-    }
-
-    const size_t nameOffset = 56;
-    const size_t nameBytesMax = 72;
-    const size_t charsToWrite = std::min(name.size(), nameBytesMax / 2);
-    for (size_t i = 0; i < charsToWrite; ++i) {
-        entry[nameOffset + (i * 2)] = static_cast<uint8_t>(name[i]);
-        entry[nameOffset + (i * 2) + 1] = 0;
-    }
-
-    return entry;
-}
-
-std::vector<uint8_t> BuildPrimaryGpt(const std::vector<EmmcPartitionDesc> &partitions)
-{
-    std::vector<uint8_t> partBytes(kPartEntries * kPartEntrySize, 0);
-
-    uint64_t previousEndLba = 0;
-    uint64_t maxUsedLba = 0;
-    const uint64_t lbasPerMb = kMbSize / kBlockSize;
-
-    for (size_t idx = 0; idx < partitions.size() && idx < kPartEntries; ++idx) {
-        const EmmcPartitionDesc &part = partitions[idx];
-        uint64_t startLba = 0;
-        if (part.startMb > 0) {
-            startLba = part.startMb * lbasPerMb;
-        } else {
-            startLba = previousEndLba + 1;
-        }
-
-        const uint64_t sizeLbas = part.sizeMb * lbasPerMb;
-        const uint64_t endLba = startLba + sizeLbas - 1;
-
-        previousEndLba = endLba;
-        maxUsedLba = std::max(maxUsedLba, endLba);
-
-        const std::vector<uint8_t> entry = BuildPartitionEntry(part.name, startLba, endLba);
-        std::copy(entry.begin(), entry.end(), partBytes.begin() + (idx * kPartEntrySize));
-    }
-
-    const uint32_t partArrayCrc = ComputeCRC32(partBytes.data(), partBytes.size());
-
-    std::vector<uint8_t> header(kBlockSize, 0);
-    const char signature[] = "EFI PART";
-    std::copy(signature, signature + 8, header.begin());
-
-    header[8] = static_cast<uint8_t>(kGptRevision & 0xFF);
-    header[9] = static_cast<uint8_t>((kGptRevision >> 8) & 0xFF);
-    header[10] = static_cast<uint8_t>((kGptRevision >> 16) & 0xFF);
-    header[11] = static_cast<uint8_t>((kGptRevision >> 24) & 0xFF);
-
-    header[12] = static_cast<uint8_t>(kGptHeaderSize & 0xFF);
-    header[13] = static_cast<uint8_t>((kGptHeaderSize >> 8) & 0xFF);
-    header[14] = static_cast<uint8_t>((kGptHeaderSize >> 16) & 0xFF);
-    header[15] = static_cast<uint8_t>((kGptHeaderSize >> 24) & 0xFF);
-
-    const uint64_t currentLba = 1;
-    const uint64_t backupLba = 0;
-    const uint64_t firstUsableLba = 34;
-
-    for (size_t i = 0; i < 8; ++i) {
-        header[24 + i] = static_cast<uint8_t>((currentLba >> (i * 8)) & 0xFF);
-        header[32 + i] = static_cast<uint8_t>((backupLba >> (i * 8)) & 0xFF);
-        header[40 + i] = static_cast<uint8_t>((firstUsableLba >> (i * 8)) & 0xFF);
-        header[48 + i] = static_cast<uint8_t>((maxUsedLba >> (i * 8)) & 0xFF);
-    }
-
-    const std::array<uint8_t, 16> diskGuid = UuidToGptBytes(MakeRandomUuidCanonical());
-    std::copy(diskGuid.begin(), diskGuid.end(), header.begin() + 56);
-
-    const uint64_t partEntryLba = 2;
-    for (size_t i = 0; i < 8; ++i) {
-        header[72 + i] = static_cast<uint8_t>((partEntryLba >> (i * 8)) & 0xFF);
-    }
-
-    header[80] = static_cast<uint8_t>(kPartEntries & 0xFF);
-    header[81] = static_cast<uint8_t>((kPartEntries >> 8) & 0xFF);
-    header[82] = static_cast<uint8_t>((kPartEntries >> 16) & 0xFF);
-    header[83] = static_cast<uint8_t>((kPartEntries >> 24) & 0xFF);
-
-    header[84] = static_cast<uint8_t>(kPartEntrySize & 0xFF);
-    header[85] = static_cast<uint8_t>((kPartEntrySize >> 8) & 0xFF);
-    header[86] = static_cast<uint8_t>((kPartEntrySize >> 16) & 0xFF);
-    header[87] = static_cast<uint8_t>((kPartEntrySize >> 24) & 0xFF);
-
-    header[88] = static_cast<uint8_t>(partArrayCrc & 0xFF);
-    header[89] = static_cast<uint8_t>((partArrayCrc >> 8) & 0xFF);
-    header[90] = static_cast<uint8_t>((partArrayCrc >> 16) & 0xFF);
-    header[91] = static_cast<uint8_t>((partArrayCrc >> 24) & 0xFF);
-
-    const uint32_t headerCrc = ComputeCRC32(header.data(), kGptHeaderSize);
-    header[16] = static_cast<uint8_t>(headerCrc & 0xFF);
-    header[17] = static_cast<uint8_t>((headerCrc >> 8) & 0xFF);
-    header[18] = static_cast<uint8_t>((headerCrc >> 16) & 0xFF);
-    header[19] = static_cast<uint8_t>((headerCrc >> 24) & 0xFF);
-
-    if (partBytes.size() < kGptTableSize) {
-        partBytes.resize(kGptTableSize, 0);
-    }
-
-    std::vector<uint8_t> gpt = BuildProtectiveMbr();
-    gpt.insert(gpt.end(), header.begin(), header.end());
-    gpt.insert(gpt.end(), partBytes.begin(), partBytes.end());
-
-    return gpt;
-}
-
-uint32_t GetImageTypeFromPartitionName(const std::string &partitionName)
-{
-    const std::string name = ToLower(partitionName);
-
-    if (name.find("sysmgr") != std::string::npos) {
-        return kImgTypeSm;
-    }
-
-    if (name.find("bl") != std::string::npos && name.find("m52") == std::string::npos) {
-        return kImgTypeBl;
-    }
-
-    if (name.find("tzk") != std::string::npos) {
-        return kImgTypeOptee;
-    }
-
-    return kImgTypeGpt;
-}
 
 std::string VersionToString(uint32_t version)
 {
@@ -398,30 +124,6 @@ std::string VersionToString(uint32_t version)
     return out.str();
 }
 
-bool DecompressGzip(const std::filesystem::path &src, const std::filesystem::path &dst)
-{
-    gzFile gz = gzopen(src.string().c_str(), "rb");
-    if (gz == nullptr) {
-        return false;
-    }
-
-    std::ofstream out(dst, std::ios::binary);
-    if (!out) {
-        gzclose(gz);
-        return false;
-    }
-
-    static constexpr size_t kDecompressBufSize = 65536;
-    std::vector<uint8_t> buf(kDecompressBufSize);
-    int bytesRead = 0;
-    while ((bytesRead = gzread(gz, buf.data(), static_cast<unsigned>(kDecompressBufSize))) > 0) {
-        out.write(reinterpret_cast<const char *>(buf.data()), bytesRead);
-    }
-
-    gzclose(gz);
-    return bytesRead == 0 && !out.fail();
-}
-
 std::string DeviceModeToString(SL26XXDeviceMode mode)
 {
     switch (mode) {
@@ -431,6 +133,8 @@ std::string DeviceModeToString(SL26XXDeviceMode mode)
         return "m52bl";
     case SL26XXDeviceMode::SL26XX_DEVICE_MODE_SYSMGR:
         return "sysmgr";
+    case SL26XXDeviceMode::SL26XX_DEVICE_MODE_FASTBOOT:
+        return "fastboot";
     default:
         return "unknown";
     }
@@ -514,9 +218,13 @@ public:
         const uint8_t numInterfaces = m_usbDevice->GetNumInterfaces();
         const uint16_t sysMgrVid = bootImage->GetSysMgrVendorId();
         const uint16_t sysMgrPid = bootImage->GetSysMgrProductId();
+        const uint16_t fastbootVid = bootImage->GetFastbootVendorId();
+        const uint16_t fastbootPid = bootImage->GetFastbootProductId();
 
         SL26XXDeviceMode resolvedMode = SL26XXDeviceMode::SL26XX_DEVICE_MODE_UNKNOWN;
-        if (sysMgrVid != 0 && devVid == sysMgrVid && devPid == sysMgrPid) {
+        if (fastbootVid != 0 && devVid == fastbootVid && devPid == fastbootPid) {
+            resolvedMode = SL26XXDeviceMode::SL26XX_DEVICE_MODE_FASTBOOT;
+        } else if (sysMgrVid != 0 && devVid == sysMgrVid && devPid == sysMgrPid) {
             resolvedMode = SL26XXDeviceMode::SL26XX_DEVICE_MODE_SYSMGR;
         } else if (numInterfaces > 1) {
             resolvedMode = SL26XXDeviceMode::SL26XX_DEVICE_MODE_BOOTROM;
@@ -587,9 +295,62 @@ public:
                 return 0;
             }
 
+            // If updating via fastboot: load U-Boot (A-Core) which will re-enumerate as fastboot device.
+            if (!m_bootOnly && fastbootVid != 0) {
+                if (!RunAcoreSequence(*bootImage)) {
+                    m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
+                    ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX A-Core sequence for fastboot update");
+                    return -1;
+                }
+                // Device will disconnect and re-enumerate as fastboot USB device.
+                m_status = ASTRA_DEVICE_STATUS_BOOT_PROGRESS;
+                return 1;
+            }
+
             // AUTO, SYSMGR stage, and all others — SysMgr is the natural endpoint.
             m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
             ReportStatus(ASTRA_DEVICE_STATUS_BOOT_COMPLETE, 100, "", "Device already in SysMgr");
+            return 0;
+        } else if (resolvedMode == SL26XXDeviceMode::SL26XX_DEVICE_MODE_FASTBOOT) {
+            // Device is in fastboot mode; open the fastboot transport and start the
+            // shared image-serving loop.  Boot and update images are served from the
+            // same loop — Update() simply appends flash images while the loop runs.
+            m_fastbootDevice = std::make_unique<FastBootDevice>(m_usbDevice.get());
+            if (!m_fastbootDevice->Open([this]() {
+                    // Disconnect during an active session: only stop the image loop if
+                    // we are NOT in rebind-mode (rebind-mode waits for a reconnect).
+                    if (!m_rebindArmed.load()) {
+                        m_running.store(false);
+                        m_deviceEventCV.notify_all();
+                    }
+                })) {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open fastboot device" << endLog;
+                m_fastbootDevice.reset();
+                m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
+                ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to open fastboot device");
+                return -1;
+            }
+
+            // If the device already carries our UUID as its serial# (i.e. it
+            // has booted at least once from a uEnv.txt we wrote), arm rebind-mode
+            // so the image-serving loop survives the fb_exit disconnects.
+            {
+                std::string serialno;
+                if (m_fastbootDevice->GetVar("serialno", serialno) && IsAstraUuid(serialno)) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: UUID serial '" << serialno
+                        << "' found, arming rebind-mode" << endLog;
+                    m_updateSessionUuid = serialno;
+                    m_rebindArmed.store(true);
+                    if (m_registerFastbootSerial) {
+                        m_registerFastbootSerial(serialno);
+                    }
+                }
+            }
+
+            m_deviceDir = m_tempDir;
+            BuildBootImageList(bootImage, bootStage);
+            m_status = ASTRA_DEVICE_STATUS_BOOT_START;
+            StartImageRequestThread();
             return 0;
         }
 
@@ -602,61 +363,38 @@ public:
     {
         ASTRA_LOG;
 
-        if (!m_deviceOpened) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX device is not booted/opened" << endLog;
-            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
-            ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_FAIL, 0, "", "Device not open");
-            return -1;
-        }
-
-        if (dynamic_cast<USBCDCDevice *>(m_usbDevice.get()) == nullptr) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX update requires a USB CDC device" << endLog;
-            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
-            ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_FAIL, 0, "", "SL26XX update requires USB CDC transport");
-            return -1;
-        }
-
         if (flashImage == nullptr) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Missing flash image" << endLog;
-            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
-            ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_FAIL, 0, "", "Missing flash image");
+            log(ASTRA_LOG_LEVEL_ERROR) << "Missing flash image for SL26XX fastboot update" << endLog;
             return -1;
         }
 
-        if (flashImage->GetFlashImageType() != FLASH_IMAGE_TYPE_EMMC) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX implementation currently supports eMMC images only" << endLog;
-            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
-            ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_FAIL, 0, "", "SL26XX supports eMMC updates only");
-            return -1;
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(m_rxMutex);
-            m_deviceDisconnected = false;
-            m_rxBuffer.clear();
-        }
-        m_expectResetDisconnect = false;
-
-        m_status = ASTRA_DEVICE_STATUS_UPDATE_START;
-        ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_START, 0, "", "Starting SL26XX eMMC update");
-
-        if (!RunEmmcUpdateFlow(flashImage)) {
-            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
-            ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_FAIL, 0, "", "SL26XX eMMC update failed");
-            return -1;
-        }
-
-        m_status = ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
-        ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_COMPLETE, 100, "", "Success");
+        // Append flash images to the shared list; the running loop will serve them.
+        AppendUpdateImages(flashImage);
         return 0;
     }
 
     int WaitForCompletion() override
     {
-        if (m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL || m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL) {
-            return -1;
+        ASTRA_LOG;
+
+        if (m_imageRequestThread.joinable()) {
+            // Fastboot mode: wait for the shared image-serving loop to finish.
+            std::unique_lock<std::mutex> lock(m_deviceEventMutex);
+            m_deviceEventCV.wait(lock, [this] { return !m_running.load(); });
+
+            if (m_bootOnly) {
+                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+                    ReportStatus(m_status, 100, "", "Success");
+                }
+            } else {
+                if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                    ReportStatus(m_status, 100, "", "Success");
+                }
+            }
         }
-        return 0;
+
+        return (m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL) ? -1 : 0;
     }
 
     int SendToConsole(const std::string &data) override
@@ -686,6 +424,16 @@ public:
             return;
         }
 
+        // Signal the image-serving loop to stop.
+        m_running.store(false);
+        m_deviceEventCV.notify_all();
+        m_rebindCV.notify_all();  // wake any thread waiting in WaitForRebind()
+
+        // Unregister from the manager's fastboot-serial registry.
+        if (!m_updateSessionUuid.empty() && m_unregisterFastbootSerial) {
+            m_unregisterFastbootSerial(m_updateSessionUuid);
+        }
+
         {
             std::lock_guard<std::mutex> rxLock(m_rxMutex);
             m_deviceDisconnected = true;
@@ -694,16 +442,44 @@ public:
         }
         m_expectResetDisconnect = false;
 
-        m_deviceOpened = false;
+        // Join the image-serving thread before resetting the fastboot device so that
+        // WaitForImageRequest can still use m_fastbootDevice until the thread exits.
+        if (m_imageRequestThread.joinable()) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Joining image request thread" << endLog;
+            m_imageRequestThread.join();
+        }
+
+        {
+            std::lock_guard<std::mutex> imgLock(m_imageMutex);
+            m_images.clear();
+        }
+
+        // Close the USB device (stops and joins the callback thread) BEFORE
+        // destroying FastBootDevice.  The callback thread may still be draining
+        // its queue and calling FastBootDevice::USBEventHandler; resetting
+        // m_fastbootDevice first would leave the thread with a dangling 'this'.
         AstraDeviceImpl::Close();
+
+        m_fastbootDevice.reset();
+        m_deviceOpened = false;
     }
 
 private:
-    using ImageActionMap = std::unordered_map<std::string, std::vector<std::string>>;
+    std::unique_ptr<FastBootDevice> m_fastbootDevice;
 
     std::mutex m_closeMutex;
     std::atomic<bool> m_closed{false};
     bool m_deviceOpened = false;
+
+    // Rebind-mode state: armed once the device carries our UUID as serialno.
+    // m_rebindReady is set by Rebind() and cleared by WaitForRebind().
+    // m_fbExitPending is set after sending fb_exit so that WaitForImageRequest
+    // skips all USB communication until the disconnect actually occurs.
+    std::atomic<bool> m_rebindArmed{false};
+    std::atomic<bool> m_rebindReady{false};
+    std::atomic<bool> m_fbExitPending{false};
+    std::mutex m_rebindMutex;
+    std::condition_variable m_rebindCV;
 
     std::mutex m_rxMutex;
     std::condition_variable m_rxCV;
@@ -917,50 +693,6 @@ private:
         }
 
         return ReadResponseCode(rawMode, timeout);
-    }
-
-    int SendEmmcCommand(uint32_t subCommand, uint32_t param1, uint32_t param2,
-        std::chrono::milliseconds timeout, std::chrono::milliseconds delay)
-    {
-        ASTRA_LOG;
-
-        std::vector<uint8_t> innerPacket;
-        innerPacket.reserve(kOpHeaderSize);
-        innerPacket.push_back(kHostSync1);
-        innerPacket.push_back(kHostSync2);
-        innerPacket.push_back(kServiceIdBoot);
-        innerPacket.push_back(kOpcodeEmmcOp);
-        AppendU32LE(innerPacket, 0);
-        AppendU32LE(innerPacket, subCommand);
-        AppendU32LE(innerPacket, param1);
-        AppendU32LE(innerPacket, param2);
-        AppendU32LE(innerPacket, 0);
-        AppendU32LE(innerPacket, 0);
-        AppendU32LE(innerPacket, 0);
-
-        std::vector<uint8_t> packet;
-        packet.reserve(kHostHeaderSize + innerPacket.size());
-        packet.push_back(kHostSync1);
-        packet.push_back(kHostSync2);
-        packet.push_back(kHostApiServiceId);
-        packet.push_back(kHostApiOpcodeEmmc);
-        AppendU32LE(packet, static_cast<uint32_t>(innerPacket.size()));
-        packet.insert(packet.end(), innerPacket.begin(), innerPacket.end());
-
-        ClearRxBuffer();
-
-        if (!WriteAll(packet.data(), packet.size())) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to write eMMC command packet" << endLog;
-            return -1;
-        }
-
-        const int rc = ReadResponseCode(false, timeout);
-
-        if (delay.count() > 0) {
-            std::this_thread::sleep_for(delay);
-        }
-
-        return rc;
     }
 
     int SendSpkCommand(uint8_t opcode, const uint8_t *payload, uint32_t payloadSize,
@@ -1356,14 +1088,17 @@ private:
             return false;
         }
 
+        // A-Core takes control immediately after the TZK exec — SysMgr never sends a response.
+        m_expectResetDisconnect = true;
         const int execRc2 = SendPacket(kServiceIdBoot, kOpcodeExec0C, {}, kHostApiOpcodeExec,
-            0, 0, false, std::chrono::seconds(5));
+            0, 0, false, std::chrono::seconds(5), std::nullopt, false, false);
         if (execRc2 != 0) {
+            m_expectResetDisconnect = false;
             log(ASTRA_LOG_LEVEL_ERROR) << "TZK exec command failed, rc=" << execRc2 << endLog;
             return false;
         }
 
-        log(ASTRA_LOG_LEVEL_INFO) << "SL26XX A-Core sequence complete" << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "SL26XX A-Core sequence complete, waiting for fastboot re-enumeration" << endLog;
         return true;
     }
 
@@ -1463,424 +1198,260 @@ private:
         return UploadData(buffer.data(), buffer.size(), imageName, imageType, loadAddress, rawMode, reportStatus, totalSize, byteOffset);
     }
 
-    bool ParseImageList(const std::filesystem::path &imageListPath, ImageActionMap &actions)
+    // -----------------------------------------------------------------------
+    // Virtual hook: WakeImageRequestThread
+    // Notify all CVs so a thread blocked in WaitForImageRequest or WaitForRebind
+    // wakes up promptly when m_running is cleared by Close() / shutdown.
+    // -----------------------------------------------------------------------
+    void WakeImageRequestThread() override
+    {
+        m_rebindCV.notify_all();
+    }
+
+    // -----------------------------------------------------------------------
+    // Virtual hook: Rebind
+    // Called by the manager when a fastboot device reconnects with a matching
+    // UUID serial.  Swaps the USB device and wakes the waiting image loop.
+    // -----------------------------------------------------------------------
+    void Rebind(std::unique_ptr<USBDevice> newDevice) override
     {
         ASTRA_LOG;
 
-        std::ifstream file(imageListPath);
-        if (!file) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open emmc_image_list: " << imageListPath.string() << endLog;
+        if (m_closed.load()) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX Rebind: impl already closed, ignoring" << endLog;
+            return;
+        }
+
+        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: rebinding to new USB device" << endLog;
+
+        // Close the old USB device FIRST — this stops and joins the callback
+        // thread (started by EnableInterrupts() / Open()).  The callback thread
+        // holds a std::bind to FastBootDevice::USBEventHandler with 'this'
+        // pointing at the current m_fastbootDevice; we must join the thread
+        // before resetting m_fastbootDevice or we get a use-after-free.
+        if (m_usbDevice) {
+            m_usbDevice->Close();
+        }
+
+        // Now safe to tear down the old FastBootDevice wrapper.
+        m_fastbootDevice.reset();
+
+        // Take ownership of the new USB device.
+        m_usbDevice = std::move(newDevice);
+
+        // Reconstruct FastBootDevice over the new USB device.
+        m_fastbootDevice = std::make_unique<FastBootDevice>(m_usbDevice.get());
+        if (!m_fastbootDevice->Open([this]() {
+                if (!m_rebindArmed.load()) {
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
+                }
+            })) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: failed to open new device after rebind" << endLog;
+            m_fastbootDevice.reset();
+            m_running.store(false);
+            m_deviceEventCV.notify_all();
+            m_rebindCV.notify_all();
+            return;
+        }
+
+        // Signal WaitForImageRequest that a new device is ready.
+        {
+            std::lock_guard<std::mutex> lock(m_rebindMutex);
+            m_rebindReady.store(true);
+        }
+        m_rebindCV.notify_all();
+        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: rebind complete" << endLog;
+    }
+
+    // -----------------------------------------------------------------------
+    // WaitForRebind
+    // Blocks until a new USB device is rebound (m_rebindReady), the impl is
+    // shut down (m_running cleared), or the timeout elapses.
+    // Returns true if a rebind arrived; false on timeout or shutdown.
+    // -----------------------------------------------------------------------
+    bool WaitForRebind()
+    {
+        ASTRA_LOG;
+
+        constexpr auto kTimeout = std::chrono::seconds(30);
+        std::unique_lock<std::mutex> lock(m_rebindMutex);
+        bool ok = m_rebindCV.wait_for(lock, kTimeout,
+            [this] { return m_rebindReady.load() || !m_running.load(); });
+
+        if (!ok || !m_running.load()) {
+            if (!ok) {
+                log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: timeout waiting for reconnect" << endLog;
+            }
             return false;
         }
-
-        std::string line;
-        while (std::getline(file, line)) {
-            const std::string trimmed = Trim(line);
-            if (trimmed.empty() || trimmed[0] == '#') {
-                continue;
-            }
-
-            std::vector<std::string> parts = SplitByComma(trimmed);
-            if (parts.size() < 2) {
-                continue;
-            }
-
-            std::string fileName = parts[0];
-            const std::string target = ToLower(parts[1]);
-
-            if (fileName.find("rootfs_s.subimg") != std::string::npos) {
-                fileName = "rootfs.subimg.gz";
-            }
-
-            std::vector<std::string> &files = actions[target];
-            if (std::find(files.begin(), files.end(), fileName) == files.end()) {
-                files.push_back(fileName);
-            }
-        }
-
+        m_rebindReady.store(false);
+        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: rebind received, resuming image loop" << endLog;
         return true;
     }
 
-    bool ParsePartitionList(const std::filesystem::path &partListPath, std::vector<EmmcPartitionDesc> &partitions)
+    // -----------------------------------------------------------------------
+    // Virtual hook: WaitForImageRequest
+    // Polls the SL26XX fastboot fb_command variable.  Blocks internally until
+    // a "stage <filename>" command arrives, the device disconnects, m_running
+    // is cleared, or the caller-supplied timeout elapses.
+    // -----------------------------------------------------------------------
+    bool WaitForImageRequest(std::string &name, uint8_t &imageType,
+        std::chrono::milliseconds timeout) override
     {
         ASTRA_LOG;
 
-        std::ifstream file(partListPath);
-        if (!file) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open emmc_part_list: " << partListPath.string() << endLog;
-            return false;
-        }
+        auto deadline = std::chrono::steady_clock::now() + timeout;
 
-        std::string line;
-        while (std::getline(file, line)) {
-            std::string trimmed = Trim(line);
-            if (trimmed.empty() || trimmed[0] == '#') {
-                continue;
-            }
-
-            std::vector<std::string> fields = SplitByComma(trimmed);
-            if (fields.size() < 3) {
-                std::stringstream ss(trimmed);
-                fields.clear();
-                std::string token;
-                while (ss >> token) {
-                    fields.push_back(token);
-                }
-                if (fields.size() < 3) {
+        while (m_running.load() && std::chrono::steady_clock::now() < deadline) {
+            if (!m_fastbootDevice || m_fastbootDevice->IsDisconnected()) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot device disconnected" << endLog;
+                m_fbExitPending.store(false);
+                if (m_rebindArmed.load() && WaitForRebind()) {
+                    // Rebind succeeded; reset the deadline and retry.
+                    deadline = std::chrono::steady_clock::now() + timeout;
                     continue;
                 }
+                m_running.store(false);
+                m_deviceEventCV.notify_all();
+                return false;
             }
 
-            EmmcPartitionDesc desc;
-            desc.name = fields[0];
-            try {
-                desc.startMb = std::stoull(fields[1], nullptr, 0);
-                desc.sizeMb = std::stoull(fields[2], nullptr, 0);
-            } catch (const std::exception &) {
-                continue;
-            }
-
-            if (desc.sizeMb == 0) {
-                continue;
-            }
-
-            partitions.push_back(desc);
-        }
-
-        return !partitions.empty();
-    }
-
-    std::optional<std::filesystem::path> ResolveImagePath(const std::filesystem::path &imageDir,
-        const std::string &fileName)
-    {
-        std::filesystem::path basePath = imageDir / fileName;
-        if (std::filesystem::exists(basePath)) {
-            return basePath;
-        }
-
-        if (basePath.extension() != ".gz") {
-            std::filesystem::path gzPath = basePath;
-            gzPath += ".gz";
-            if (std::filesystem::exists(gzPath)) {
-                return gzPath;
-            }
-        } else {
-            std::filesystem::path noGzPath = basePath;
-            noGzPath.replace_extension("");
-            if (std::filesystem::exists(noGzPath)) {
-                return noGzPath;
-            }
-        }
-
-        return std::nullopt;
-    }
-
-    bool InitAndSwitchToUser()
-    {
-        ASTRA_LOG;
-
-        if (SendEmmcCommand(0, 0, 0, std::chrono::seconds(2), std::chrono::milliseconds(100)) != 0) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX eMMC init command failed" << endLog;
-            return false;
-        }
-
-        if (SendEmmcCommand(2, 0, 0, std::chrono::seconds(2), std::chrono::milliseconds(100)) != 0) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX eMMC user-area switch failed" << endLog;
-            return false;
-        }
-
-        return true;
-    }
-
-    uint64_t UploadAndFlashChunked(const std::filesystem::path &imagePath, const std::string &imageName,
-        uint64_t startLba, uint32_t imageType)
-    {
-        ASTRA_LOG;
-
-        std::ifstream file(imagePath, std::ios::binary);
-        if (!file) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open chunked image: " << imagePath.string() << endLog;
-            return 0;
-        }
-
-        const uint64_t totalFileSize = std::filesystem::file_size(imagePath);
-
-        ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_START, 0, imageName);
-
-        const size_t chunkSizeBytes = static_cast<size_t>(kChunkSizeMb * kMbSize);
-        std::vector<uint8_t> chunkBuffer(chunkSizeBytes);
-
-        uint64_t currentLba = startLba;
-        uint64_t totalBlocksWritten = 0;
-        uint64_t bytesReadSoFar = 0;
-
-        while (file.good()) {
-            file.read(reinterpret_cast<char *>(chunkBuffer.data()), static_cast<std::streamsize>(chunkBuffer.size()));
-            const std::streamsize bytesRead = file.gcount();
-            if (bytesRead <= 0) {
-                break;
-            }
-
-            std::vector<uint8_t> chunk(chunkBuffer.begin(), chunkBuffer.begin() + bytesRead);
-            const size_t padLen = (kBlockSize - (chunk.size() % kBlockSize)) % kBlockSize;
-            if (padLen > 0) {
-                chunk.insert(chunk.end(), padLen, 0);
-            }
-
-            const uint32_t chunkBlocks = static_cast<uint32_t>(chunk.size() / kBlockSize);
-
-            if (!UploadBuffer(chunk, imageName, imageType, kAddrAcLoad, false, false, totalFileSize, bytesReadSoFar)) {
-                return 0;
-            }
-
-            if (SendEmmcCommand(5, static_cast<uint32_t>(currentLba), chunkBlocks,
-                    std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-            {
-                return 0;
-            }
-
-            if (SendEmmcCommand(4, static_cast<uint32_t>(currentLba), chunkBlocks,
-                    std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-            {
-                return 0;
-            }
-
-            if (SendEmmcCommand(3, static_cast<uint32_t>(currentLba), chunkBlocks,
-                    std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-            {
-                return 0;
-            }
-
-            currentLba += chunkBlocks;
-            totalBlocksWritten += chunkBlocks;
-            bytesReadSoFar += static_cast<uint64_t>(bytesRead);
-        }
-
-        ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE, 100, imageName);
-        return totalBlocksWritten;
-    }
-
-    bool RunEmmcUpdateFlow(const std::shared_ptr<FlashImage> &flashImage)
-    {
-        ASTRA_LOG;
-
-        std::filesystem::path partListPath;
-        std::filesystem::path imageListPath;
-
-        for (const Image &image : flashImage->GetImages()) {
-            if (image.GetName() == "emmc_part_list") {
-                partListPath = image.GetPath();
-            } else if (image.GetName() == "emmc_image_list") {
-                imageListPath = image.GetPath();
-            }
-        }
-
-        if (partListPath.empty() || imageListPath.empty()) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Missing emmc_part_list or emmc_image_list in flash image" << endLog;
-            return false;
-        }
-
-        const std::filesystem::path imageDir = partListPath.parent_path();
-
-        std::vector<EmmcPartitionDesc> partitions;
-        if (!ParsePartitionList(partListPath, partitions)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to parse emmc_part_list" << endLog;
-            return false;
-        }
-
-        ImageActionMap operations;
-        if (!ParseImageList(imageListPath, operations) || operations.empty()) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to parse emmc_image_list" << endLog;
-            return false;
-        }
-
-        const std::vector<uint8_t> gpt = BuildPrimaryGpt(partitions);
-        const uint32_t gptBlocks = static_cast<uint32_t>((gpt.size() + kBlockSize - 1) / kBlockSize);
-
-        if (!UploadBuffer(gpt, "gpt.bin", kImgTypeGpt)) {
-            return false;
-        }
-
-        if (!InitAndSwitchToUser()) {
-            return false;
-        }
-
-        if (SendEmmcCommand(5, 0, gptBlocks, std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0) {
-            return false;
-        }
-
-        if (SendEmmcCommand(4, 0, gptBlocks, std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0) {
-            return false;
-        }
-
-        if (SendEmmcCommand(3, 0, gptBlocks, std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0) {
-            return false;
-        }
-
-        for (uint32_t bootId : {1U, 2U}) {
-            const std::string key = "b" + std::to_string(bootId);
-            auto it = operations.find(key);
-            if (it == operations.end()) {
-                continue;
-            }
-
-            for (const std::string &fileName : it->second) {
-                const std::optional<std::filesystem::path> path = ResolveImagePath(imageDir, fileName);
-                if (!path.has_value()) {
-                    log(ASTRA_LOG_LEVEL_ERROR) << "Missing boot image file: " << fileName << endLog;
-                    return false;
-                }
-
-                std::filesystem::path effectivePath = path.value();
-                if (effectivePath.extension() == ".gz") {
-                    log(ASTRA_LOG_LEVEL_INFO) << "Decompressing " << effectivePath.filename().string() << endLog;
-                    std::filesystem::path decompressedPath = std::filesystem::path(m_tempDir) / effectivePath.stem();
-                    if (!DecompressGzip(effectivePath, decompressedPath)) {
-                        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to decompress: " << effectivePath.string() << endLog;
+            // fb_exit was sent.  In rebind-mode we cannot rely on
+            // IsDisconnected() because bulk-only fastboot has no pending
+            // USB transfers, so the no-device event is never fired and
+            // m_disconnected is never set.  Go directly to WaitForRebind()
+            // — but only while the update is still in progress.  Once
+            // UPDATE_COMPLETE (or BOOT_COMPLETE in boot-only mode) is set,
+            // the fb_exit is the final disconnect; disarm rebind and let
+            // the loop exit cleanly.
+            if (m_fbExitPending.load()) {
+                if (m_rebindArmed.load()) {
+                    const bool updateDone =
+                        (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) ||
+                        (m_bootOnly && m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE);
+                    if (updateDone) {
+                        // Final fb_exit — no more images to serve.
+                        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: update done, stopping after final fb_exit" << endLog;
+                        m_rebindArmed.store(false);
+                        m_fbExitPending.store(false);
+                        m_running.store(false);
+                        m_deviceEventCV.notify_all();
                         return false;
                     }
-                    effectivePath = decompressedPath;
-                }
-
-                const uint64_t fileSize = std::filesystem::file_size(effectivePath);
-                const uint32_t fileBlocks = static_cast<uint32_t>((fileSize + kBlockSize - 1) / kBlockSize);
-
-                if (!UploadFile(effectivePath, fileName, kImgTypeGpt)) {
-                    return false;
-                }
-
-                if (SendEmmcCommand(0, 0, 0, std::chrono::seconds(2), std::chrono::milliseconds(200)) != 0) {
-                    return false;
-                }
-
-                if (SendEmmcCommand(2, bootId, 0, std::chrono::seconds(2), std::chrono::seconds(12)) != 0) {
-                    return false;
-                }
-
-                if (SendEmmcCommand(5, 0, fileBlocks, std::chrono::seconds(240), std::chrono::seconds(3)) != 0) {
-                    return false;
-                }
-
-                if (SendEmmcCommand(4, 0, fileBlocks, std::chrono::seconds(240), std::chrono::seconds(7)) != 0) {
-                    return false;
-                }
-
-                if (SendEmmcCommand(3, 0, fileBlocks, std::chrono::seconds(240), std::chrono::milliseconds(0)) != 0) {
-                    return false;
-                }
-            }
-        }
-
-        const uint64_t lbasPerMb = kMbSize / kBlockSize;
-        uint64_t previousEnd = 0;
-
-        for (size_t index = 0; index < partitions.size(); ++index) {
-            const EmmcPartitionDesc &part = partitions[index];
-
-            const uint64_t startLba = part.startMb > 0 ? (part.startMb * lbasPerMb) : (previousEnd + 1);
-            const uint64_t sizeLbas = part.sizeMb * lbasPerMb;
-            const uint64_t endLba = startLba + sizeLbas - 1;
-            previousEnd = endLba;
-
-            const std::string targetId = "sd" + std::to_string(index + 1);
-            auto opIt = operations.find(targetId);
-            if (opIt == operations.end()) {
-                continue;
-            }
-
-            uint64_t currentOffset = 0;
-            for (const std::string &fileName : opIt->second) {
-                const std::string lowerName = ToLower(fileName);
-                if (lowerName == "format") {
-                    continue;
-                }
-
-                if (lowerName == "erase") {
-                    if (!InitAndSwitchToUser()) {
-                        return false;
-                    }
-
-                    if (SendEmmcCommand(5, static_cast<uint32_t>(startLba), static_cast<uint32_t>(sizeLbas),
-                            std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-                    {
-                        return false;
-                    }
-                    continue;
-                }
-
-                const std::optional<std::filesystem::path> filePath = ResolveImagePath(imageDir, fileName);
-                if (!filePath.has_value()) {
-                    if (ToLower(part.name).find("home") != std::string::npos) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: fb_exit pending, waiting for rebind" << endLog;
+                    m_fbExitPending.store(false);
+                    if (WaitForRebind()) {
+                        deadline = std::chrono::steady_clock::now() + timeout;
                         continue;
                     }
-
-                    log(ASTRA_LOG_LEVEL_ERROR) << "Missing image file for " << targetId << ": " << fileName << endLog;
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
                     return false;
                 }
-
-                std::filesystem::path effectivePath = filePath.value();
-                if (effectivePath.extension() == ".gz") {
-                    log(ASTRA_LOG_LEVEL_INFO) << "Decompressing " << effectivePath.filename().string() << endLog;
-                    std::filesystem::path decompressedPath = std::filesystem::path(m_tempDir) / effectivePath.stem();
-                    if (!DecompressGzip(effectivePath, decompressedPath)) {
-                        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to decompress: " << effectivePath.string() << endLog;
-                        return false;
-                    }
-                    effectivePath = decompressedPath;
-                }
-
-                const uint64_t fileSize = std::filesystem::file_size(effectivePath);
-                const uint64_t fileBlocks = (fileSize + kBlockSize - 1) / kBlockSize;
-                const uint64_t targetLba = startLba + currentOffset;
-
-                if ((targetLba + fileBlocks - 1) > endLba) {
-                    log(ASTRA_LOG_LEVEL_ERROR) << "Image overflows partition: " << fileName << " -> " << part.name << endLog;
-                    return false;
-                }
-
-                const uint32_t imageType = GetImageTypeFromPartitionName(part.name);
-
-                if (!InitAndSwitchToUser()) {
-                    return false;
-                }
-
-                const double fileSizeMb = static_cast<double>(fileSize) / static_cast<double>(kMbSize);
-                if (fileSizeMb > static_cast<double>(kLargeFileThresholdMb)) {
-                    const uint64_t writtenBlocks = UploadAndFlashChunked(effectivePath, fileName, targetLba, imageType);
-                    if (writtenBlocks == 0) {
-                        return false;
-                    }
-                    currentOffset += writtenBlocks;
-                    continue;
-                }
-
-                if (!UploadFile(effectivePath, fileName, imageType)) {
-                    return false;
-                }
-
-                if (SendEmmcCommand(5, static_cast<uint32_t>(targetLba), static_cast<uint32_t>(fileBlocks),
-                        std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-                {
-                    return false;
-                }
-
-                if (SendEmmcCommand(4, static_cast<uint32_t>(targetLba), static_cast<uint32_t>(fileBlocks),
-                        std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-                {
-                    return false;
-                }
-
-                if (SendEmmcCommand(3, static_cast<uint32_t>(targetLba), static_cast<uint32_t>(fileBlocks),
-                        std::chrono::seconds(240), std::chrono::milliseconds(100)) != 0)
-                {
-                    return false;
-                }
-
-                currentOffset += fileBlocks;
+                // Non-rebind mode: wait for the disconnect to be detected via
+                // a failed transfer on the next GetVar attempt.
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
             }
+
+            std::string fbCommand;
+            if (!m_fastbootDevice->GetVar("fb_command", fbCommand)) {
+                // GetVar failure means the USB connection dropped.
+                if (m_rebindArmed.load()) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: GetVar failed (rebind-mode), waiting for reconnect" << endLog;
+                    if (WaitForRebind()) {
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
+                } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot disconnected after boot phase, waiting for reconnect" << endLog;
+                } else {
+                    log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX failed to get fb_command" << endLog;
+                }
+                m_running.store(false);
+                m_deviceEventCV.notify_all();
+                return false;
+            }
+
+            if (!fbCommand.empty()) {
+                // Parse "stage <filename>".
+                std::istringstream iss(fbCommand);
+                std::vector<std::string> parts;
+                std::string token;
+                while (iss >> token) {
+                    parts.push_back(token);
+                }
+
+                if (parts.empty() || parts[0] != "stage" || parts.size() < 2) {
+                    log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX unexpected fb_command: " << fbCommand << endLog;
+                    m_running.store(false);
+                    m_deviceEventCV.notify_all();
+                    return false;
+                }
+
+                // Mirror SL16XX HandleInterrupt: transition to UPDATE when a request
+                // arrives after boot completes.
+                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && !m_bootOnly) {
+                    m_status = ASTRA_DEVICE_STATUS_UPDATE_START;
+                }
+
+                name      = parts[1];
+                imageType = 0; // SL26XX does not use interrupt-based image types
+                log(ASTRA_LOG_LEVEL_INFO) << "SL26XX stage request: " << name << endLog;
+                return true;
+            }
+
+            // fb_command is empty — nothing pending yet; retry after a short sleep.
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
 
-        return true;
+        return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Virtual hook: SendImagePayload
+    // Sends the requested file via fastboot StageFile.
+    // START / COMPLETE / FAIL events are managed by RunImageRequestLoop.
+    // -----------------------------------------------------------------------
+    int SendImagePayload(Image &image) override
+    {
+        ASTRA_LOG;
+
+        if (!m_fastbootDevice) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot device not available" << endLog;
+            return -1;
+        }
+
+        const bool ok = m_fastbootDevice->StageFile(image.GetPath(),
+            [this, &image](size_t sent, size_t total) {
+                const double pct = (total > 0)
+                    ? static_cast<double>(sent) / static_cast<double>(total) * 100.0
+                    : 100.0;
+                ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS, pct, image.GetName());
+            });
+
+        return ok ? 0 : -1;
+    }
+
+    // -----------------------------------------------------------------------
+    // Virtual hook: OnImageSent
+    // Notifies SL26XX firmware of the transfer result via OEM fastboot commands.
+    // -----------------------------------------------------------------------
+    void OnImageSent(const Image &image, bool success) override
+    {
+        (void)image;
+        if (!m_fastbootDevice) {
+            return;
+        }
+        m_fastbootDevice->Oem("run:setenv fb_ret " + std::string(success ? "OKAY" : "FAIL"));
+        // Send fb_exit without waiting for a response: U-Boot exits its staging
+        // loop and resets the USB connection before it can send OKAY back.
+        // Set m_fbExitPending so WaitForImageRequest does not attempt any further
+        // USB transfers until the disconnect is detected and (if in rebind-mode)
+        // a new device instance arrives.
+        m_fbExitPending.store(true);
+        m_fastbootDevice->OemNoWait("run:setenv fb_exit 1");
     }
 };
 

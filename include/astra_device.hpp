@@ -67,6 +67,20 @@ public:
 
     void Close();
 
+    /**
+     * Hand a newly-arrived USB device to this AstraDevice's impl for rebinding.
+     * Called by the manager when a fastboot reconnect matches a registered UUID.
+     */
+    void Rebind(std::unique_ptr<USBDevice> device);
+
+    /**
+     * Install registration callbacks so the impl can register / unregister
+     * its UUID with the manager's fastboot-serial rebind registry.
+     */
+    void SetRegistrationCallbacks(
+        std::function<void(const std::string &)> registerFn,
+        std::function<void(const std::string &)> unregisterFn);
+
     static const std::string AstraDeviceStatusToString(AstraDeviceStatus status);
     static const std::string AstraDeviceSeriesToString(AstraDeviceSeries series);
     static AstraDeviceBootStage BootStageFromString(const std::string &stage);

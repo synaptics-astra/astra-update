@@ -41,6 +41,12 @@ public:
 
     int Write(uint8_t *data, size_t size, int *transferred) override = 0;
 
+    virtual int ReadBulk(uint8_t *data, size_t size, int *transferred, int timeoutMs = 5000)
+    {
+        (void)data; (void)size; (void)transferred; (void)timeoutMs;
+        return -1;
+    }
+
     virtual int WriteInterruptData(const uint8_t *data, size_t size) = 0;
 
 protected:

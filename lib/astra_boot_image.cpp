@@ -33,6 +33,13 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             m_sysMgrProductId = std::stoi(manifest["sysmgr_product_id"].as<std::string>(), nullptr, 16);
         }
 
+        m_fastbootVendorId = 0;
+        m_fastbootProductId = 0;
+        if (manifest["fastboot_vendor_id"] && manifest["fastboot_product_id"]) {
+            m_fastbootVendorId = std::stoi(manifest["fastboot_vendor_id"].as<std::string>(), nullptr, 16);
+            m_fastbootProductId = std::stoi(manifest["fastboot_product_id"].as<std::string>(), nullptr, 16);
+        }
+
         std::string secureBootString = manifest["secure_boot"].as<std::string>();
         std::transform(secureBootString.begin(), secureBootString.end(), secureBootString.begin(), ::tolower);
         m_secureBootVersion = secureBootString == "gen2" ? ASTRA_SECURE_BOOT_V2 : ASTRA_SECURE_BOOT_V3;
@@ -101,6 +108,10 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         if (m_sysMgrVendorId != 0 || m_sysMgrProductId != 0) {
             log(ASTRA_LOG_LEVEL_INFO) << "SysMgr Vendor ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_sysMgrVendorId << endLog;
             log(ASTRA_LOG_LEVEL_INFO) << "SysMgr Product ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_sysMgrProductId << endLog;
+        }
+        if (m_fastbootVendorId != 0 || m_fastbootProductId != 0) {
+            log(ASTRA_LOG_LEVEL_INFO) << "Fastboot Vendor ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_fastbootVendorId << endLog;
+            log(ASTRA_LOG_LEVEL_INFO) << "Fastboot Product ID: 0x" << std::hex << std::uppercase << std::setfill('0') << std::setw(4) << m_fastbootProductId << endLog;
         }
         log(ASTRA_LOG_LEVEL_INFO) << "U-Boot console: " << (m_ubootConsole == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Transport type: " << AstraTransportToString(m_transportType) << endLog;

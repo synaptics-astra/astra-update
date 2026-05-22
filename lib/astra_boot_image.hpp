@@ -35,6 +35,8 @@ public:
     std::vector<std::pair<uint16_t, uint16_t>> GetVendorProductIdPairs() const;
     uint16_t GetSysMgrVendorId() const { return m_sysMgrVendorId; }
     uint16_t GetSysMgrProductId() const { return m_sysMgrProductId; }
+    uint16_t GetFastbootVendorId() const { return m_fastbootVendorId; }
+    uint16_t GetFastbootProductId() const { return m_fastbootProductId; }
     std::string GetChipName() const { return m_chipName; }
     std::string GetBoardName() const { return m_boardName; }
     std::string GetID() const { return m_id; }
@@ -67,6 +69,8 @@ private:
     uint16_t m_productId;
     uint16_t m_sysMgrVendorId;
     uint16_t m_sysMgrProductId;
+    uint16_t m_fastbootVendorId = 0;
+    uint16_t m_fastbootProductId = 0;
     AstraUbootVariant m_ubootVariant;
     std::string m_finalBootImage;
     bool m_linuxBoot = false;

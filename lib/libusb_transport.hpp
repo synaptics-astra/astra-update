@@ -27,7 +27,7 @@ public:
 
 protected:
     libusb_context *m_ctx;
-    libusb_hotplug_callback_handle m_callbackHandle;
+    std::vector<libusb_hotplug_callback_handle> m_callbackHandles;
     std::function<void(std::unique_ptr<USBDevice>)> m_deviceAddedCallback;
 
     void DeviceMonitorThread();

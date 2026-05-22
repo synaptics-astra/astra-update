@@ -26,6 +26,11 @@ int LibUSBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t s
     int ret = 0;
 
     if (m_config) {
+        // Already open; update the event callback so a re-open (e.g. after ProbeSerial)
+        // installs the caller's handler without going through full open again.
+        if (usbEventCallback) {
+            m_usbEventCallback = usbEventCallback;
+        }
         log(ASTRA_LOG_LEVEL_INFO) << "USB device is already open" << endLog;
         return 0;
     }
@@ -201,12 +206,10 @@ int LibUSBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t s
 
     // Validate that required endpoints were found
     if (m_interruptInEndpoint == 0 || m_interruptInSize == 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt IN endpoint not found" << endLog;
-        return -1;
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Interrupt IN endpoint not found (bulk-only mode)" << endLog;
     }
     if (m_interruptOutEndpoint == 0 || m_interruptOutSize == 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt OUT endpoint not found" << endLog;
-        return -1;
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Interrupt OUT endpoint not found (bulk-only mode)" << endLog;
     }
     if (m_bulkOutEndpoint == 0 || m_bulkOutSize == 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Bulk OUT endpoint not found" << endLog;
@@ -215,62 +218,103 @@ int LibUSBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t s
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "Discovered endpoints - Interrupt IN: 0x" << std::hex
         << static_cast<int>(m_interruptInEndpoint) << ", Interrupt OUT: 0x"
-        << static_cast<int>(m_interruptOutEndpoint) << ", Bulk OUT: 0x"
+        << static_cast<int>(m_interruptOutEndpoint) << ", Bulk IN: 0x"
+        << static_cast<int>(m_bulkInEndpoint) << ", Bulk OUT: 0x"
         << static_cast<int>(m_bulkOutEndpoint) << std::dec << endLog;
 
-    // Allocate transfers and buffers with cleanup on failure
-    m_inputInterruptXfer = libusb_alloc_transfer(0);
-    if (!m_inputInterruptXfer) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate input interrupt transfer" << endLog;
-        return -1;
-    }
-
-    m_outputInterruptXfer = libusb_alloc_transfer(0);
-    if (!m_outputInterruptXfer) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate output interrupt transfer" << endLog;
-        libusb_free_transfer(m_inputInterruptXfer);
-        m_inputInterruptXfer = nullptr;
-        return -1;
-    }
+    const bool hasInterruptEndpoints = (m_interruptInEndpoint != 0 && m_interruptOutEndpoint != 0
+        && m_interruptInSize != 0 && m_interruptOutSize != 0);
 
     m_bulkWriteXfer = libusb_alloc_transfer(0);
     if (!m_bulkWriteXfer) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate bulk out transfer" << endLog;
-        libusb_free_transfer(m_inputInterruptXfer);
-        m_inputInterruptXfer = nullptr;
-        libusb_free_transfer(m_outputInterruptXfer);
-        m_outputInterruptXfer = nullptr;
         return -1;
     }
 
-    m_interruptInBuffer = new uint8_t[m_interruptInSize];
-    m_interruptOutBuffer = new uint8_t[m_interruptOutSize];
+    // Allocate and set up interrupt transfers only when interrupt endpoints are present
+    if (hasInterruptEndpoints) {
+        m_inputInterruptXfer = libusb_alloc_transfer(0);
+        if (!m_inputInterruptXfer) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate input interrupt transfer" << endLog;
+            libusb_free_transfer(m_bulkWriteXfer);
+            m_bulkWriteXfer = nullptr;
+            return -1;
+        }
 
-    libusb_fill_interrupt_transfer(m_inputInterruptXfer, m_handle, m_interruptInEndpoint,
-        m_interruptInBuffer, m_interruptInSize, HandleTransfer, this, 0);
+        m_outputInterruptXfer = libusb_alloc_transfer(0);
+        if (!m_outputInterruptXfer) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to allocate output interrupt transfer" << endLog;
+            libusb_free_transfer(m_inputInterruptXfer);
+            m_inputInterruptXfer = nullptr;
+            libusb_free_transfer(m_bulkWriteXfer);
+            m_bulkWriteXfer = nullptr;
+            return -1;
+        }
 
-    // Submit interrupt transfer immediately to avoid losing interrupts
-    // Interrupts will be queued until EnableInterrupts() starts the callback worker thread
-    m_running.store(true);
-    ret = libusb_submit_transfer(m_inputInterruptXfer);
-    if (ret < 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
-        m_running.store(false);
-        delete[] m_interruptInBuffer;
-        m_interruptInBuffer = nullptr;
-        delete[] m_interruptOutBuffer;
-        m_interruptOutBuffer = nullptr;
-        libusb_free_transfer(m_inputInterruptXfer);
-        m_inputInterruptXfer = nullptr;
-        libusb_free_transfer(m_outputInterruptXfer);
-        m_outputInterruptXfer = nullptr;
-        libusb_free_transfer(m_bulkWriteXfer);
-        m_bulkWriteXfer = nullptr;
+        m_interruptInBuffer = new uint8_t[m_interruptInSize];
+        m_interruptOutBuffer = new uint8_t[m_interruptOutSize];
+
+        libusb_fill_interrupt_transfer(m_inputInterruptXfer, m_handle, m_interruptInEndpoint,
+            m_interruptInBuffer, m_interruptInSize, HandleTransfer, this, 0);
+
+        m_running.store(true);
+        ret = libusb_submit_transfer(m_inputInterruptXfer);
+        if (ret < 0) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit input interrupt transfer: " << libusb_error_name(ret) << endLog;
+            m_running.store(false);
+            delete[] m_interruptInBuffer;
+            m_interruptInBuffer = nullptr;
+            delete[] m_interruptOutBuffer;
+            m_interruptOutBuffer = nullptr;
+            libusb_free_transfer(m_inputInterruptXfer);
+            m_inputInterruptXfer = nullptr;
+            libusb_free_transfer(m_outputInterruptXfer);
+            m_outputInterruptXfer = nullptr;
+            libusb_free_transfer(m_bulkWriteXfer);
+            m_bulkWriteXfer = nullptr;
+            return ret;
+        }
+
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Interrupt transfer submitted, interrupts will queue" << endLog;
+    } else {
+        // Bulk-only mode (e.g. fastboot device): mark running so Write() succeeds
+        m_running.store(true);
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Opened in bulk-only mode (no interrupt endpoints)" << endLog;
+    }
+
+    return 0;
+}
+
+int LibUSBDevice::ReadBulk(uint8_t *data, size_t size, int *transferred, int timeoutMs)
+{
+    ASTRA_LOG;
+
+    if (!m_running.load()) {
+        return -1;
+    }
+
+    if (m_bulkInEndpoint == 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Bulk IN endpoint not available" << endLog;
+        return -1;
+    }
+
+    int actualTransferred = 0;
+    int ret = libusb_bulk_transfer(m_handle, m_bulkInEndpoint, data,
+        static_cast<int>(size), &actualTransferred, static_cast<unsigned int>(timeoutMs));
+
+    if (ret < 0 && ret != LIBUSB_ERROR_TIMEOUT) {
+        // PIPE errors are expected when the device resets mid-transfer (e.g.
+        // U-Boot disconnecting after receiving a command that triggers a reboot).
+        const auto level = (ret == LIBUSB_ERROR_PIPE) ? ASTRA_LOG_LEVEL_DEBUG : ASTRA_LOG_LEVEL_ERROR;
+        log(level) << "ReadBulk failed: " << libusb_error_name(ret) << endLog;
         return ret;
     }
 
-    log(ASTRA_LOG_LEVEL_DEBUG) << "Interrupt transfer submitted, interrupts will queue" << endLog;
-    return 0;
+    if (transferred != nullptr) {
+        *transferred = actualTransferred;
+    }
+
+    return (ret == LIBUSB_ERROR_TIMEOUT && actualTransferred == 0) ? LIBUSB_ERROR_TIMEOUT : 0;
 }
 
 int LibUSBDevice::EnableInterrupts()
