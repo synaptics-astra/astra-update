@@ -199,10 +199,10 @@ public:
         }
         m_expectResetDisconnect = false;
 
-        if (!m_bootOnly) {
-            // On SL26XX image updating is handled by the sysmgr. Once the sysmgr is running then booting is complete
-            // and we move on to the update phase.
-            bootStage = ASTRA_DEVICE_BOOT_STAGE_SYSMGR;
+        if (bootStage == ASTRA_DEVICE_BOOT_STAGE_AUTO) {
+            // SL26XX boots through sysmgr to U-Boot; default to the bootloader stage
+            // for both boot-only and update modes.
+            bootStage = ASTRA_DEVICE_BOOT_STAGE_BOOTLOADER;
         }
 
         ret = m_usbDevice->EnableInterrupts();
@@ -290,24 +290,19 @@ public:
                     ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX A-Core boot sequence");
                     return -1;
                 }
+                if (fastbootVid != 0) {
+                    // U-Boot will re-enumerate as a fastboot device and request uEnv.txt.
+                    // BOOT_COMPLETE is reported from the image loop once uEnv.txt is served.
+                    m_status = ASTRA_DEVICE_STATUS_BOOT_PROGRESS;
+                    return 1;
+                }
+                // No fastboot device expected — boot is complete.
                 m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
                 ReportStatus(ASTRA_DEVICE_STATUS_BOOT_COMPLETE, 100, "", "SL26XX A-Core bootloader sequence complete");
                 return 0;
             }
 
-            // If updating via fastboot: load U-Boot (A-Core) which will re-enumerate as fastboot device.
-            if (!m_bootOnly && fastbootVid != 0) {
-                if (!RunAcoreSequence(*bootImage)) {
-                    m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
-                    ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX A-Core sequence for fastboot update");
-                    return -1;
-                }
-                // Device will disconnect and re-enumerate as fastboot USB device.
-                m_status = ASTRA_DEVICE_STATUS_BOOT_PROGRESS;
-                return 1;
-            }
-
-            // AUTO, SYSMGR stage, and all others — SysMgr is the natural endpoint.
+            // SYSMGR explicitly requested — SysMgr is the terminal stage.
             m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
             ReportStatus(ASTRA_DEVICE_STATUS_BOOT_COMPLETE, 100, "", "Device already in SysMgr");
             return 0;
