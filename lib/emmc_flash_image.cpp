@@ -45,7 +45,11 @@ int EmmcFlashImage::Load()
                     if (potentialChipName.size() == 6 && std::isdigit(potentialChipName[2]) && std::isdigit(potentialChipName[3]) &&
                         std::isdigit(potentialChipName[4]) && std::isdigit(potentialChipName[5]))
                     {
-                        if (!m_chipName.empty() && potentialChipName != m_chipName) {
+                        bool chipMismatch = !m_chipName.empty() &&
+                            (m_chipName.compare(0, 5, "sl261") == 0
+                                ? potentialChipName.compare(0, 5, m_chipName, 0, 5) != 0
+                                : potentialChipName != m_chipName);
+                        if (chipMismatch) {
                             log(ASTRA_LOG_LEVEL_WARNING) << "Image tag chip name: " << potentialChipName <<
                                 "chip name in config" << m_chipName << endLog;
                             continue;
@@ -63,6 +67,12 @@ int EmmcFlashImage::Load()
                             log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
                         }
                         else if (m_chipName.empty() && potentialChipName == "sl1620") {
+                            m_chipName = potentialChipName;
+                            m_secureBootVersion = ASTRA_SECURE_BOOT_V3;
+                            m_memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                            log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
+                        }
+                        else if(m_chipName.empty() && potentialChipName.compare(0, 5, "sl261") == 0) {
                             m_chipName = potentialChipName;
                             m_secureBootVersion = ASTRA_SECURE_BOOT_V3;
                             m_memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
