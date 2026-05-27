@@ -1344,10 +1344,12 @@ private:
                     m_deviceEventCV.notify_all();
                     return false;
                 }
-                // Non-rebind mode: wait for the disconnect to be detected via
-                // a failed transfer on the next GetVar attempt.
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
+                // Non-rebind mode: fall through to the GetVar attempt below.
+                // The transfer will fail immediately with NO_DEVICE once the
+                // device disconnects after fb_exit, which sets m_running=false
+                // and allows RunImageRequestLoop to exit cleanly without
+                // reporting a spurious BOOT_FAIL.
+                m_fbExitPending.store(false);
             }
 
             std::string fbCommand;
