@@ -11,7 +11,7 @@ void SpiFlashImage::ParseSpiFlashConfig(const std::map<std::string, std::string>
 {
     ASTRA_LOG;
 
-    SpiImageConfig spiConfig;
+    SpiImageConfig spiConfig(m_chipName);
 
     spiConfig.imageFile = imageFile;
 
@@ -97,7 +97,7 @@ int SpiFlashImage::Load()
             m_finalImage = imageFile;
 
             // If no manifest file was provided, then we will use the default SPI flash configuration.
-            SpiImageConfig spiConfig;
+            SpiImageConfig spiConfig(m_chipName);
             spiConfig.imageFile = imageFile;
             m_spiImageConfigs.push_back(spiConfig);
         } else {
@@ -106,14 +106,25 @@ int SpiFlashImage::Load()
     }
 
     // Flash primary and secondary copies of the SPI U-Boot image
-    for (const auto &imageConfig : m_spiImageConfigs) {
-        m_flashCommand += "usbload " + imageConfig.imageFile + " " + imageConfig.readAddress + "; spinit; erase "
-            + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength + "; cp.b "
-            + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress
-            + " " + imageConfig.writeLength + "; erase "
-            + imageConfig.eraseSecondStartAddress + " " + imageConfig.eraseSecondLength
-            + "; cp.b " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress
-            + " " + imageConfig.writeLength + "; ";
+    if (m_chipName.compare(0, 5, "sl261") == 0) {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Using SL2610 SPI flash command sequence" << endLog;
+        for (const auto &imageConfig : m_spiImageConfigs) {
+             m_flashCommand += "usbload "  + imageConfig.imageFile + " " + imageConfig.readAddress + "; sf probe; sf erase " + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength
+                + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress + " " + imageConfig.writeLength;
+        }
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Copy flash command: " << m_flashCommand << endLog;
+    } else {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Using default SPI flash command sequence" << endLog;
+        for (const auto &imageConfig : m_spiImageConfigs) {
+            m_flashCommand += "usbload " + imageConfig.imageFile + " " + imageConfig.readAddress + "; spinit; erase "
+                + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength + "; cp.b "
+                + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress
+                + " " + imageConfig.writeLength + "; erase "
+                + imageConfig.eraseSecondStartAddress + " " + imageConfig.eraseSecondLength
+                + "; cp.b " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress
+                + " " + imageConfig.writeLength + "; ";
+        }
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Flash command: " << m_flashCommand << endLog;
     }
 
     if (m_resetWhenComplete) {
