@@ -124,10 +124,15 @@ void LibUSBTransport::Shutdown()
 
         // Stop the callback worker thread after the event thread has exited
         // (no more devices will be enqueued at this point).
-        m_callbackCV.notify_all();
-        if (m_callbackWorkerThread.joinable()) {
-            m_callbackWorkerThread.join();
-        }
+        StopCallbackWorkerThread();
+    }
+}
+
+void LibUSBTransport::StopCallbackWorkerThread()
+{
+    m_callbackCV.notify_all();
+    if (m_callbackWorkerThread.joinable()) {
+        m_callbackWorkerThread.join();
     }
 }
 

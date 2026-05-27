@@ -39,6 +39,11 @@ protected:
     static int LIBUSB_CALL HotplugEventCallback(libusb_context *ctx, libusb_device *device,
                                                 libusb_hotplug_event event, void *user_data);
 
+    // Stop the async callback-worker thread.  Must be called after the libusb
+    // event thread (DeviceMonitorThread) has already been joined so no new
+    // devices can be enqueued.  Safe to call multiple times.
+    void StopCallbackWorkerThread();
+
 private:
     // Async dispatch: HotplugEventCallback enqueues arriving devices here so the
     // libusb event thread (DeviceMonitorThread) is never blocked by user code that

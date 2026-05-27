@@ -92,6 +92,10 @@ void WinLibUSBTransport::Shutdown()
         if (m_deviceMonitorThread.joinable()) {
             m_deviceMonitorThread.join();
         }
+
+        // Join the base-class callback-worker thread now that the event thread
+        // has exited and no more devices can be enqueued.
+        StopCallbackWorkerThread();
     }
 }
 
