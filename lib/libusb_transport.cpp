@@ -121,6 +121,13 @@ void LibUSBTransport::Shutdown()
         if (m_deviceMonitorThread.joinable()) {
             m_deviceMonitorThread.join();
         }
+
+        // Stop the callback worker thread after the event thread has exited
+        // (no more devices will be enqueued at this point).
+        m_callbackCV.notify_all();
+        if (m_callbackWorkerThread.joinable()) {
+            m_callbackWorkerThread.join();
+        }
     }
 }
 
@@ -129,6 +136,37 @@ void LibUSBTransport::StartDeviceMonitor()
     ASTRA_LOG;
 
     m_deviceMonitorThread = std::thread(&LibUSBTransport::DeviceMonitorThread, this);
+    m_callbackWorkerThread = std::thread(&LibUSBTransport::CallbackWorkerThread, this);
+}
+
+void LibUSBTransport::CallbackWorkerThread()
+{
+    ASTRA_LOG;
+
+    while (m_running.load()) {
+        std::unique_ptr<USBDevice> device;
+        {
+            std::unique_lock<std::mutex> lock(m_callbackMutex);
+            m_callbackCV.wait(lock, [this] {
+                return !m_running.load() || !m_pendingCallbacks.empty();
+            });
+            if (!m_pendingCallbacks.empty()) {
+                device = std::move(m_pendingCallbacks.front());
+                m_pendingCallbacks.pop();
+            }
+        }
+        if (device) {
+            if (m_deviceAddedCallback) {
+                try {
+                    m_deviceAddedCallback(std::move(device));
+                } catch (const std::bad_function_call& e) {
+                    log(ASTRA_LOG_LEVEL_ERROR) << "Error in device added callback: " << e.what() << endLog;
+                }
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "No device added callback" << endLog;
+            }
+        }
+    }
 }
 
 std::string LibUSBTransport::ConstructUSBPath(libusb_device *device)
@@ -222,16 +260,16 @@ int LIBUSB_CALL LibUSBTransport::HotplugEventCallback(libusb_context *ctx, libus
         }
 
         std::unique_ptr<USBDevice> usbDevice = std::make_unique<LibUSBDevice>(device, usbPath, transport->m_ctx, handle);
-        if (transport->m_deviceAddedCallback) {
-            try {
-                transport->m_deviceAddedCallback(std::move(usbDevice));
-            } catch (const std::bad_function_call& e) {
-                log(ASTRA_LOG_LEVEL_ERROR) << "Error: " << e.what() << endLog;
-                return 1;
-            }
-        } else {
-            log(ASTRA_LOG_LEVEL_ERROR) << "No device added callback" << endLog;
+        // Enqueue for the callback worker thread instead of calling directly.
+        // The hotplug callback runs on the libusb event thread; calling user code
+        // (which may invoke Write() and block on a condition variable) from here
+        // would deadlock because the event thread would be unable to process the
+        // transfer-completion event needed to unblock Write().
+        {
+            std::lock_guard<std::mutex> lk(transport->m_callbackMutex);
+            transport->m_pendingCallbacks.push(std::move(usbDevice));
         }
+        transport->m_callbackCV.notify_one();
     }
 
     return 0;

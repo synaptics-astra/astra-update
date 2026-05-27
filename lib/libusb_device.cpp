@@ -509,20 +509,28 @@ int LibUSBDevice::Write(uint8_t *data, size_t size, int *transferred)
         break;
     }
 
-    std::unique_lock<std::mutex> lock(m_writeCompleteMutex);
-    m_writeCompleteCV.wait(lock, [this] {
-        if (m_writeComplete.load()) {
-            m_writeComplete.store(false);
-            return true;
-        }
-        return false;
-    });
+    {
+        std::unique_lock<std::mutex> lock(m_writeCompleteMutex);
+        m_writeCompleteCV.wait(lock, [this] {
+            return !m_running.load() || m_writeComplete.load();
+        });
+    }
+
+    const bool writeError = m_writeError.exchange(false);
+    const bool writeComplete = m_writeComplete.exchange(false);
+
+    if (!writeComplete) {
+        // Woken by shutdown, not by transfer completion
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Write aborted: device shut down" << endLog;
+        return -1;
+    }
 
     *transferred = m_actualBytesWritten;
 
-    log(ASTRA_LOG_LEVEL_DEBUG) << "Write Complete: bytes written: " << m_actualBytesWritten << endLog;
+    log(ASTRA_LOG_LEVEL_DEBUG) << "Write Complete: bytes written: " << m_actualBytesWritten
+        << (writeError ? " [ERROR]" : "") << endLog;
 
-    return 0;
+    return writeError ? -1 : 0;
 }
 
 int LibUSBDevice::WriteInterruptData(const uint8_t *data, size_t size)
@@ -637,6 +645,17 @@ void LibUSBDevice::HandleTransfer(struct libusb_transfer *transfer)
         }
         device->m_cancellationCV.notify_one();
 
+        // Unblock any Write() waiting on this bulk OUT transfer
+        if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
+                transfer->endpoint == device->m_bulkOutEndpoint) {
+            {
+                std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
+                device->m_writeError.store(true);
+                device->m_writeComplete.store(true);
+            }
+            device->m_writeCompleteCV.notify_one();
+        }
+
         queueEvent(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
         device->m_running.store(false);
@@ -659,6 +678,17 @@ void LibUSBDevice::HandleTransfer(struct libusb_transfer *transfer)
         }
         device->m_cancellationCV.notify_one();
 
+        // Unblock any Write() waiting on this bulk OUT transfer
+        if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
+                transfer->endpoint == device->m_bulkOutEndpoint) {
+            {
+                std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
+                device->m_writeError.store(true);
+                device->m_writeComplete.store(true);
+            }
+            device->m_writeCompleteCV.notify_one();
+        }
+
         queueEvent(USB_DEVICE_EVENT_TRANSFER_CANCELED, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_STALL) {
         log(ASTRA_LOG_LEVEL_WARNING) << "Endpoint stalled, clearing halt" << endLog;
@@ -671,12 +701,32 @@ void LibUSBDevice::HandleTransfer(struct libusb_transfer *transfer)
             } else {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint: " << libusb_error_name(ret) << endLog;
             }
+            // Unblock any Write() waiting on this bulk OUT transfer
+            if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
+                    transfer->endpoint == device->m_bulkOutEndpoint) {
+                {
+                    std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
+                    device->m_writeError.store(true);
+                    device->m_writeComplete.store(true);
+                }
+                device->m_writeCompleteCV.notify_one();
+            }
         } else {
             log(ASTRA_LOG_LEVEL_INFO) << "Halt cleared, retrying transfer" << endLog;
             resubmit = true;
         }
     } else {
         log(ASTRA_LOG_LEVEL_ERROR) << "Transfer failed: " << libusb_error_name(transfer->status) << endLog;
+        // Unblock any Write() waiting on this bulk OUT transfer
+        if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
+                transfer->endpoint == device->m_bulkOutEndpoint) {
+            {
+                std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
+                device->m_writeError.store(true);
+                device->m_writeComplete.store(true);
+            }
+            device->m_writeCompleteCV.notify_one();
+        }
         queueEvent(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
     }
 

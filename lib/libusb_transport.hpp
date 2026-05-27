@@ -6,6 +6,8 @@
 #include "libusb_device.hpp"
 
 #include <libusb-1.0/libusb.h>
+#include <queue>
+#include <condition_variable>
 
 class LibUSBTransport : public USBTransport{
 public:
@@ -36,4 +38,15 @@ protected:
 
     static int LIBUSB_CALL HotplugEventCallback(libusb_context *ctx, libusb_device *device,
                                                 libusb_hotplug_event event, void *user_data);
+
+private:
+    // Async dispatch: HotplugEventCallback enqueues arriving devices here so the
+    // libusb event thread (DeviceMonitorThread) is never blocked by user code that
+    // calls Write() or other blocking operations.
+    std::thread m_callbackWorkerThread;
+    std::queue<std::unique_ptr<USBDevice>> m_pendingCallbacks;
+    std::mutex m_callbackMutex;
+    std::condition_variable m_callbackCV;
+
+    void CallbackWorkerThread();
 };

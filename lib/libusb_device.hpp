@@ -14,7 +14,8 @@ public:
         m_inputInterruptXfer(nullptr), m_outputInterruptXfer(nullptr), m_bulkWriteXfer(nullptr),
         m_interruptInEndpoint(0), m_interruptOutEndpoint(0), m_interruptInSize(0), m_interruptOutSize(0),
         m_interruptInBuffer(nullptr), m_interruptOutBuffer(nullptr),
-        m_bulkInEndpoint(0), m_bulkOutEndpoint(0), m_bulkInSize(0), m_bulkOutSize(0)
+        m_bulkInEndpoint(0), m_bulkOutEndpoint(0), m_bulkInSize(0), m_bulkOutSize(0),
+        m_bulkTransferTimeout(0)
     {
         ASTRA_LOG;
 
@@ -65,6 +66,7 @@ protected:
     std::mutex m_writeCompleteMutex;
     std::condition_variable m_writeCompleteCV;
     std::atomic<bool> m_writeComplete = false;
+    std::atomic<bool> m_writeError = false;
 
     int m_bulkTransferTimeout;
 
