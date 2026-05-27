@@ -198,38 +198,34 @@ public:
     {
         ASTRA_LOG;
 
-        std::lock_guard<std::mutex> lock(m_sl16CloseMutex);
-        if (m_sl16Shutdown.exchange(true)) {
-            return;
-        }
-
-        // Wake WaitForImageRequest before joining.
-        m_running.store(false);
-        m_deviceEventCV.notify_all();
-        m_imageRequestCV.notify_all();
-
-        if (m_imageRequestThread.joinable()) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Joining image request thread" << endLog;
-            m_imageRequestThread.join();
-        }
-
         {
-            std::lock_guard<std::mutex> imgLock(m_imageMutex);
-            m_images.clear();
+            std::lock_guard<std::mutex> lock(m_closeMutex);
+            if (m_shutdown.exchange(true)) {
+                return;
+            }
         }
+
+        // Wake the image-request thread (m_imageRequestCV) and join it.
+        // StopImageRequestThread() handles m_running=false, deviceEventCV
+        // notify, WakeImageRequestThread() (overridden below to notify
+        // m_imageRequestCV), join, and clears m_images.
+        StopImageRequestThread();
 
         if (m_console != nullptr) {
             m_console->Shutdown();
         }
 
-        AstraDeviceImpl::Close();
+        // Close the underlying USB device (matches what the base Close()
+        // would have done).  Done here directly because we have already
+        // taken the close-guard above.
+        if (m_usbDevice != nullptr) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Closing USB device" << endLog;
+            m_usbDevice->Close();
+        }
+        m_status = ASTRA_DEVICE_STATUS_CLOSED;
     }
 
 private:
-    // SL16XX-specific close guard.
-    std::atomic<bool> m_sl16Shutdown{false};
-    std::mutex m_sl16CloseMutex;
-
     // Interrupt / image-request signalling.
     std::condition_variable m_imageRequestCV;
     std::mutex m_imageRequestMutex;

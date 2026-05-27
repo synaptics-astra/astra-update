@@ -414,21 +414,16 @@ public:
     {
         ASTRA_LOG;
 
-        std::lock_guard<std::mutex> lock(m_closeMutex);
-        if (m_closed.exchange(true)) {
-            return;
+        {
+            std::lock_guard<std::mutex> lock(m_closeMutex);
+            if (m_shutdown.exchange(true)) {
+                return;
+            }
         }
 
-        // Signal the image-serving loop to stop.
-        m_running.store(false);
-        m_deviceEventCV.notify_all();
-        m_rebindCV.notify_all();  // wake any thread waiting in WaitForRebind()
-
-        // Unregister from the manager's fastboot-serial registry.
-        if (!m_updateSessionUuid.empty() && m_unregisterFastbootSerial) {
-            m_unregisterFastbootSerial(m_updateSessionUuid);
-        }
-
+        // Mark transport as disconnected so any blocked rx waiters wake.
+        // (WakeImageRequestThread() below also notifies m_rxCV, but the
+        // m_deviceDisconnected flag is what their predicate checks.)
         {
             std::lock_guard<std::mutex> rxLock(m_rxMutex);
             m_deviceDisconnected = true;
@@ -437,23 +432,27 @@ public:
         }
         m_expectResetDisconnect = false;
 
-        // Join the image-serving thread before resetting the fastboot device so that
-        // WaitForImageRequest can still use m_fastbootDevice until the thread exits.
-        if (m_imageRequestThread.joinable()) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Joining image request thread" << endLog;
-            m_imageRequestThread.join();
+        // Unregister from the manager's fastboot-serial registry.
+        if (!m_updateSessionUuid.empty() && m_unregisterFastbootSerial) {
+            m_unregisterFastbootSerial(m_updateSessionUuid);
         }
 
-        {
-            std::lock_guard<std::mutex> imgLock(m_imageMutex);
-            m_images.clear();
-        }
+        // Wake the image-request loop (m_rebindCV via WakeImageRequestThread,
+        // m_deviceEventCV from the helper) and join it before tearing down
+        // m_fastbootDevice / m_usbDevice.  The loop may still be calling into
+        // m_fastbootDevice until it observes m_running=false and exits.
+        StopImageRequestThread();
 
-        // Close the USB device (stops and joins the callback thread) BEFORE
-        // destroying FastBootDevice.  The callback thread may still be draining
-        // its queue and calling FastBootDevice::USBEventHandler; resetting
-        // m_fastbootDevice first would leave the thread with a dangling 'this'.
-        AstraDeviceImpl::Close();
+        // Close the underlying USB device (stops and joins its callback
+        // thread) BEFORE destroying FastBootDevice -- the callback thread
+        // may still be draining its queue and calling
+        // FastBootDevice::USBEventHandler; resetting m_fastbootDevice first
+        // would leave that thread with a dangling 'this'.
+        if (m_usbDevice != nullptr) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Closing USB device" << endLog;
+            m_usbDevice->Close();
+        }
+        m_status = ASTRA_DEVICE_STATUS_CLOSED;
 
         m_fastbootDevice.reset();
         m_deviceOpened = false;
@@ -462,8 +461,6 @@ public:
 private:
     std::unique_ptr<FastBootDevice> m_fastbootDevice;
 
-    std::mutex m_closeMutex;
-    std::atomic<bool> m_closed{false};
     bool m_deviceOpened = false;
 
     // Rebind-mode state: armed once the device carries our UUID as serialno.
@@ -1195,12 +1192,15 @@ private:
 
     // -----------------------------------------------------------------------
     // Virtual hook: WakeImageRequestThread
-    // Notify all CVs so a thread blocked in WaitForImageRequest or WaitForRebind
-    // wakes up promptly when m_running is cleared by Close() / shutdown.
+    // Notify all CVs so a thread blocked in WaitForImageRequest, WaitForRebind,
+    // or any rx-buffer wait wakes up promptly when m_running is cleared by
+    // Close() / shutdown.
     // -----------------------------------------------------------------------
     void WakeImageRequestThread() override
     {
         m_rebindCV.notify_all();
+        std::lock_guard<std::mutex> lock(m_rxMutex);
+        m_rxCV.notify_all();
     }
 
     // -----------------------------------------------------------------------
@@ -1212,7 +1212,7 @@ private:
     {
         ASTRA_LOG;
 
-        if (m_closed.load()) {
+        if (m_shutdown.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX Rebind: impl already closed, ignoring" << endLog;
             return;
         }

@@ -34,9 +34,8 @@ int EmmcFlashImage::Load()
                 (filename.find("subimg") != std::string::npos))
             {
                 m_images.push_back(std::move(Image(entry.path().string(), ASTRA_IMAGE_TYPE_UPDATE_EMMC)));
-    } else if ((filename.find("TAG--") != std::string::npos) && (filename.find("astra") != std::string::npos)) {
-                // TAG file found, but skip file loading; instead use helper to detect chip info
             }
+            // TAG-- files are handled separately by DetectChipFromTagFile() below.
         }
     }
 

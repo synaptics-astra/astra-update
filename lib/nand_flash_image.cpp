@@ -80,17 +80,10 @@ int NandFlashImage::Load()
     }
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND image file: " << m_imageFile << endLog;
-    if (!m_nandReadAddress.empty()) {
-        log(ASTRA_LOG_LEVEL_DEBUG) << "NAND read address: " << m_nandReadAddress << endLog;
-    }
+    log(ASTRA_LOG_LEVEL_DEBUG) << "NAND read address: " << m_nandReadAddress << endLog;
 
-    if (!m_imageFile.empty()) {
-        m_flashCommand = "usbload " + m_nandReadAddress + " " + m_imageFile
-            + "; m2nand " + m_nandReadAddress;
-    } else {
-        log(ASTRA_LOG_LEVEL_ERROR) << "NAND image file missing!" << endLog;
-        return -1;
-    }
+    m_flashCommand = "usbload " + m_nandReadAddress + " " + m_imageFile
+        + "; m2nand " + m_nandReadAddress;
 
     if (m_resetWhenComplete) {
         m_flashCommand += m_resetCommand;

@@ -85,7 +85,7 @@ public:
 
     virtual AstraDeviceStatus GetDeviceStatus()
     {
-        return m_status;
+        return m_status.load();
     }
 
     virtual void Close()
@@ -237,7 +237,13 @@ protected:
     // -----------------------------------------------------------------------
 
     std::unique_ptr<USBDevice> m_usbDevice;
-    AstraDeviceStatus m_status = ASTRA_DEVICE_STATUS_ADDED;
+    // Atomic: read/written from the image-request loop, USB-event/interrupt
+    // thread (HandleInterrupt / USBEventHandler), and the manager thread.
+    // Plain enum reads/writes from multiple threads are UB under the C++
+    // memory model; std::atomic<EnumType> gives well-defined behaviour while
+    // preserving operator= / operator T() so existing call sites compile
+    // unchanged.
+    std::atomic<AstraDeviceStatus> m_status{ASTRA_DEVICE_STATUS_ADDED};
     std::function<void(AstraDeviceManagerResponse)> m_statusCallback;
     std::string m_deviceName;
     std::string m_tempDir;
@@ -245,12 +251,16 @@ protected:
     std::string m_bootCommand;
     AstraDeviceBootStage m_bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
 
+    // Shared close-guard used by both the base Close() and derived overrides.
+    // Derived Close() implementations should take m_closeMutex and gate on
+    // m_shutdown.exchange(true) rather than introducing their own duplicate
+    // mutex/atomic pair.
+    std::mutex m_closeMutex;
+    std::atomic<bool> m_shutdown{false};
+
 private:
     void ImageRequestThreadFunc();
     void RunImageRequestLoop();
-
-    std::atomic<bool> m_shutdown{false};
-    std::mutex m_closeMutex;
 };
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device,

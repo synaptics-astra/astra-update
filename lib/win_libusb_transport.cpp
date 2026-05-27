@@ -89,6 +89,12 @@ void WinLibUSBTransport::Shutdown()
             m_hWnd = nullptr;
         }
 
+        // Interrupt the libusb event handler so DeviceMonitorThread returns
+        // from libusb_handle_events_timeout_completed() immediately instead
+        // of sleeping up to the 100 ms timeout.
+        if (m_ctx) {
+            libusb_interrupt_event_handler(m_ctx);
+        }
         if (m_deviceMonitorThread.joinable()) {
             m_deviceMonitorThread.join();
         }

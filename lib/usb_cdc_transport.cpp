@@ -83,8 +83,11 @@ void USBCDCTransport::DeviceMonitorThread()
 
         ProcessPendingDevices();
 
-        // Polling fallback for platforms without hotplug callbacks.
-        m_hasPendingDevices.store(true);
+        // Do NOT unconditionally re-set m_hasPendingDevices here: that would turn
+        // the next wait_for() into a no-op and produce a 100% CPU busy-loop.
+        // The 500 ms wait_for timeout below already provides a polling fallback
+        // for platforms without event-driven hotplug; event-driven platforms
+        // (WinUSBCDCTransport via WM_DEVICECHANGE, etc.) wake the CV explicitly.
     }
 }
 
