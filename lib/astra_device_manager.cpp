@@ -70,6 +70,9 @@ public:
         BootImageCollection bootImageCollection = BootImageCollection(bootImagesPath);
         bootImageCollection.Load();
 
+        const bool requiresNandBootSupport =
+            m_flashImage->GetFlashImageType() == FLASH_IMAGE_TYPE_NAND;
+
         if (m_flashImage->GetBootImageId().empty()) {
             // No boot images specified.
             // Try to find the best boot image based on other properties
@@ -79,7 +82,17 @@ public:
 
             std::vector<std::shared_ptr<AstraBootImage>> bootImages = bootImageCollection.GetBootImagesForChip(m_flashImage->GetChipName(),
             m_flashImage->GetSecureBootVersion(), m_flashImage->GetMemoryLayout(), m_flashImage->GetMemoryDDRType(), m_flashImage->GetBoardName());
+            if (requiresNandBootSupport) {
+                bootImages.erase(std::remove_if(bootImages.begin(), bootImages.end(),
+                    [](const std::shared_ptr<AstraBootImage> &bootImage) {
+                        return !bootImage->GetNandSupport();
+                    }),
+                    bootImages.end());
+            }
             if (bootImages.size() == 0) {
+                if (requiresNandBootSupport) {
+                    throw std::runtime_error("No NAND-capable boot image found for chip: " + m_flashImage->GetChipName());
+                }
                 throw std::runtime_error("No boot image found for chip: " + m_flashImage->GetChipName());
             } else if (bootImages.size() > 1) {
                 m_bootImage = bootImages[0];
@@ -105,6 +118,9 @@ public:
         } else {
             // Exact boot bootImages specified
             m_bootImage = std::make_shared<AstraBootImage>(bootImageCollection.GetBootImage(m_flashImage->GetBootImageId()));
+            if (requiresNandBootSupport && !m_bootImage->GetNandSupport()) {
+                throw std::runtime_error("Selected boot image does not support NAND flash updates");
+            }
         }
 
         Init();
@@ -258,6 +274,7 @@ private:
         bootImageDescription += "    Transport Type: " + AstraTransportToString(m_bootImage->GetTransportType()) + "\n";
         bootImageDescription += "    U-Boot Console: " + std::string(m_bootImage->GetUbootConsole() == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") + "\n";
         bootImageDescription += "    uEnv.txt Support: " + std::string(m_bootImage->GetUEnvSupport() ? "enabled" : "disabled") + "\n";
+        bootImageDescription += "    NAND Support: " + std::string(m_bootImage->GetNandSupport() ? "enabled" : "disabled") + "\n";
         bootImageDescription += "    U-Boot Variant: " + std::string(m_bootImage->GetUbootVariant() == ASTRA_UBOOT_VARIANT_UBOOT ? "U-Boot" : "Synaptics U-Boot");
         ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_INFO, bootImageDescription}});
 

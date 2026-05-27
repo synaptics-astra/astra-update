@@ -61,6 +61,16 @@ protected:
     const std::string m_resetCommand = "; sleep 1; reset"; // sleep before resetting to let console messages be sent to the host
 };
 
+struct ChipDetectionResult {
+    std::string chipName;
+    AstraSecureBootVersion secureBootVersion = ASTRA_SECURE_BOOT_V3;
+    AstraMemoryLayout memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+    bool found = false;
+};
+
+// Helper function to detect chip information from Yocto TAG files
+ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const std::string& currentChipName);
+
 static std::string AstraFlashImageTypeToString(FlashImageType type)
 {
     switch (type) {

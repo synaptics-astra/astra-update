@@ -297,3 +297,28 @@ Example SPI ``manifest.yaml`` for Writing a Linux boot image:
             erase_second_start_address: 0xf1200000
             erase_second_length: 0xf1ffffff
 ```
+
+The ``manifest.yaml`` file provided with a NAND image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The ``read_address`` parameter is optional and defines the RAM address used by ``usbload`` and NAND write commands. If omitted, the tool uses ``0x10000000`` by default. The ``image_file`` parameter is optional; if omitted, the tool uses ``uNAND_full.img`` by default.
+
+Example NAND ``manifest.yaml``:
+
+```yaml
+    boot_image: 9930c714-375e-11f0-b558-0242ac110002
+    image_type: nand
+    chip: sl2610
+    board: rdk
+    image_file: uNAND_full.img
+    read_address: 0x10000000
+    reset: enable
+```
+
+Example NAND ``manifest.yaml`` using default image file:
+
+```yaml
+    boot_image: 9930c714-375e-11f0-b558-0242ac110002
+    image_type: nand
+    chip: sl2610
+    board: rdk
+    read_address: 0x10000000
+    reset: enable
+```

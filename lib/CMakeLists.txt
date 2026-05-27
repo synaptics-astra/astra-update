@@ -41,6 +41,7 @@ file(GLOB SRC astra_boot_image.cpp
                 image.cpp
                 libusb_device.cpp
                 libusb_transport.cpp
+                nand_flash_image.cpp
                 spi_flash_image.cpp
                 usb_cdc_device.cpp
                 usb_device.cpp

@@ -26,6 +26,11 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         m_vendorId = std::stoi(manifest["vendor_id"].as<std::string>(), nullptr, 16);
         m_productId = std::stoi(manifest["product_id"].as<std::string>(), nullptr, 16);
 
+        m_nandSupport = false;
+        if (manifest["nand_support"]) {
+            m_nandSupport = manifest["nand_support"].as<bool>();
+        }
+
         m_sysMgrVendorId = 0;
         m_sysMgrProductId = 0;
         if (manifest["sysmgr_vendor_id"] && manifest["sysmgr_product_id"]) {

@@ -41,6 +41,7 @@ public:
     std::string GetBoardName() const { return m_boardName; }
     std::string GetID() const { return m_id; }
     bool GetUEnvSupport() const { return m_uEnvSupport; }
+    bool GetNandSupport() const { return m_nandSupport; }
     AstraSecureBootVersion GetSecureBootVersion() const { return m_secureBootVersion; }
     AstraUbootConsole GetUbootConsole() const { return m_ubootConsole; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
@@ -75,6 +76,7 @@ private:
     std::string m_finalBootImage;
     bool m_linuxBoot = false;
     AstraDeviceBootStage m_defaultBootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
+    bool m_nandSupport = false;
 
     bool LoadManifest(std::string manifestPath);
 };
