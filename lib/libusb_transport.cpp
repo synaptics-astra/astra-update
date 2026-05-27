@@ -32,7 +32,7 @@ void LibUSBTransport::DeviceMonitorThread()
     int ret;
 
     while (m_running.load()) {
-        struct timeval tv = { 1, 0 };
+        struct timeval tv = { 0, 100000 }; // 100 ms – reduces worst-case delay when synchronous ReadBulk
         ret = libusb_handle_events_timeout_completed(m_ctx, &tv, nullptr);
         if (ret < 0) {
             if (ret == LIBUSB_ERROR_INTERRUPTED) {

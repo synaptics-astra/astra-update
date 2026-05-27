@@ -1400,7 +1400,7 @@ private:
             }
 
             // fb_command is empty — nothing pending yet; retry after a short sleep.
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
         }
 
         return false;

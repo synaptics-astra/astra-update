@@ -126,6 +126,35 @@ int LibUSBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t s
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << m_usbPath << endLog;
 
+    // Log the negotiated USB link speed.  For fastboot bulk transfers High Speed
+    // (480 Mb/s) is expected; Full Speed (12 Mb/s) limits throughput to ~1 MB/s.
+    // Speed is negotiated in hardware during the USB 2.0 HS chirp sequence and
+    // cannot be changed by host software after enumeration.  If Full Speed is
+    // reported when connected directly to a macOS USB4/Thunderbolt port but High
+    // Speed works on Linux/Windows (and works on macOS through a USB 2.0 HS hub),
+    // the root cause is that Apple's USB4 USB2-compatibility tunnel adds latency
+    // to the chirp-response path that exceeds the tolerance in the SL261x DWC2
+    // controller.  Fix: adjust GUSBCFG.USBTRDTIM and confirm DCFG.DEVSPD in the
+    // SL261x U-Boot USB driver.  See docs/sl261x-uboot-hs-chirp-fix.md.
+    {
+        const int speed = libusb_get_device_speed(m_device);
+        static const char *kSpeedNames[] = {
+            "Unknown", "Low (1.5 Mb/s)", "Full (12 Mb/s)",
+            "High (480 Mb/s)", "SuperSpeed (5 Gb/s)", "SuperSpeed+ (10 Gb/s)"
+        };
+        const int kSpeedNamesCount = static_cast<int>(sizeof(kSpeedNames) / sizeof(kSpeedNames[0]));
+        const char *speedName = (speed >= 0 && speed < kSpeedNamesCount) ? kSpeedNames[speed] : "Unknown";
+        log(ASTRA_LOG_LEVEL_INFO) << "USB device speed: " << speedName << endLog;
+
+        if (speed == LIBUSB_SPEED_FULL) {
+            log(ASTRA_LOG_LEVEL_WARNING)
+                << "USB device at " << m_usbPath << " is at Full Speed (12 Mb/s); "
+                << "expected High Speed (480 Mb/s). "
+                << "Hardware workaround: connect through a dedicated USB 2.0 High Speed hub."
+                << endLog;
+        }
+    }
+
     ret = libusb_claim_interface(m_handle, m_interfaceNumber);
     if (ret < 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to claim interface: " << libusb_error_name(ret) << endLog;

@@ -98,7 +98,7 @@ private:
 
     static constexpr size_t kCmdBufferSize = 64;
     static constexpr size_t kRespBufferSize = 64;
-    static constexpr size_t kDownloadChunkSize = 1 * 1024 * 1024; // 1 MiB
+    static constexpr size_t kDownloadChunkSize = 4 * 1024 * 1024; // 4 MiB – fewer libusb round-trips per image
 
     /**
      * Send a raw ASCII fastboot command (no more than 64 bytes).

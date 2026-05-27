@@ -52,8 +52,10 @@ file(GLOB SRC astra_boot_image.cpp
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     list(APPEND SRC win_libusb_transport.cpp win_usb_cdc_transport.cpp win_usb_cdc_device.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(APPEND SRC posix_usb_cdc_device.cpp posix_usb_cdc_transport.cpp posix_usb_cdc_transport_macos.cpp)
 else()
-    list(APPEND SRC posix_usb_cdc_device.cpp posix_usb_cdc_transport.cpp)
+    list(APPEND SRC posix_usb_cdc_device.cpp posix_usb_cdc_transport.cpp posix_usb_cdc_transport_linux.cpp)
 endif()
 
 add_library(astraupdate STATIC ${SRC})
