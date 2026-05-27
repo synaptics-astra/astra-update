@@ -31,7 +31,7 @@ public:
     void UnblockDeviceEnumeration() override {}
     void RemoveActiveDevice(const std::string& usbPath) override;
 
-    void StartDeviceMonitor();
+    virtual void StartDeviceMonitor();
 
 protected:
     void DeviceMonitorThread();
