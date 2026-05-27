@@ -73,7 +73,7 @@ int EmmcFlashImage::Load()
                             log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
                         }
                         else if(m_chipName.empty() && potentialChipName.compare(0, 5, "sl261") == 0) {
-                            m_chipName = potentialChipName;
+                            m_chipName = "sl2610";
                             m_secureBootVersion = ASTRA_SECURE_BOOT_V3;
                             m_memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
                             log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
