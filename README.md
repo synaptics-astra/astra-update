@@ -86,6 +86,7 @@ To flash SPI images without a ``manifest.yaml``:
 
 Astra Update also has additional command line parameters for providing details about images and debugging.
 
+* -B, boot-image-collection - path to the directory containing boot images.
 * -l, --log arg - path to store the log file. Use ``stdout`` to log to the console.
 * -D, --debug - provides additional debug messages in the log file.
 * -C, --continuous - will wait continuously for devices to connect. The default behavior is to exit after the first device completes.
@@ -110,7 +111,7 @@ These command line parameters describe the update image. If the image contains a
 
 ### Running on Windows
 
-Astra Update requires a USB Kernel Driver to be installed on Windows. See https://synaptics-astra.github.io/doc/v/1.6.0/linux/index.html#installing-the-winusb-driver-windows-only
+Astra Update requires a USB Kernel Driver to be installed on Windows. See https://synaptics-astra.github.io/doc/v/latest/linux/index.html#installing-the-winusb-driver-windows-only
 
 ### Running on Linux
 
@@ -224,6 +225,29 @@ Example boot image ``manifest.yaml``:
     ddr_type: lpddr4x
     uboot: suboot
     uboot_version: "U-Boot 2019.10.202505221539_202505221945-g1581c16241-dirty (May 21 2025 - 15:54:17 +0000)"
+```
+
+Example SL2610 boot image ``manifest.yaml``:
+
+```yaml
+    id: 845cc47e-54da-11f1-bfd8-0242ac110002
+    chip: sl2610
+    board: rdk
+    secure_boot: genx
+    vendor_id: 06CB
+    product_id: 019E
+    sysmgr_vendor_id: CAFE
+    sysmgr_product_id: 4002
+    fastboot_vendor_id: 18D1
+    fastboot_product_id: 4EE0
+    console: uart
+    uenv_support: true
+    nand_support: false
+    transport: usb_cdc
+    memory_layout: 2gb
+    ddr_type: ddr4
+    uboot: suboot
+    uboot_version: "U-Boot 2025.01.202605201605_202605202301-ga359a2e7e0dc (May 20 2026 - 02:59:50 +0000)"
 ```
 
 The ``manifest.yaml`` file provided with an eMMC image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The other fields provide additional information about the update image. If no ``manifest.yaml`` is provide with the update image, then the tool can determine which boot image to use based on the command line parameters or the characteristics of the update image.
