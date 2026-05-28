@@ -20,6 +20,17 @@ public:
 
 private:
     struct SpiImageConfig {
+        SpiImageConfig(const std::string chipName)
+        {
+            if (chipName.compare(0, 5, "sl261") == 0) {
+                // Overwrite default config values for SL2610 series.
+                readAddress = "0x10000000";
+                writeFirstCopyAddress = "0";
+                writeLength = "0x200000";
+                eraseFirstStartAddress = "0";
+                eraseFirstLength = "0x200000";
+            }
+        }
         std::string imageFile;
         std::string readAddress = "0x10000000";
         std::string writeFirstCopyAddress = "0xf0000000";

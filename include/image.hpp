@@ -12,7 +12,6 @@ enum AstraSecureBootVersion {
     ASTRA_SECURE_BOOT_V3,
 };
 
-
 enum AstraMemoryLayout {
     ASTRA_MEMORY_LAYOUT_1GB = 0,
     ASTRA_MEMORY_LAYOUT_2GB = 1,
@@ -34,6 +33,11 @@ enum AstraImageType {
     ASTRA_IMAGE_TYPE_UPDATE_EMMC,
     ASTRA_IMAGE_TYPE_UPDATE_SPI,
     ASTRA_IMAGE_TYPE_UPDATE_NAND,
+};
+
+enum AstraTransportType {
+    ASTRA_TRANSPORT_USB,
+    ASTRA_TRANSPORT_USB_CDC,
 };
 
 class Image
@@ -119,5 +123,17 @@ static std::string AstraMemoryDDRTypeToString(AstraMemoryDDRType ddrType)
             return "DDR4X16";
         default:
             return "not_specified";
+    }
+}
+
+static std::string AstraTransportToString(AstraTransportType transportType)
+{
+    switch (transportType) {
+        case ASTRA_TRANSPORT_USB:
+            return "USB";
+        case ASTRA_TRANSPORT_USB_CDC:
+            return "USB_CDC";
+        default:
+            return "unknown";
     }
 }

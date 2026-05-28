@@ -3,12 +3,15 @@
 
 #include <stdexcept>
 #include <iostream>
+#include <filesystem>
 #include <yaml-cpp/yaml.h>
+#include <cctype>
 #include "flash_image.hpp"
 #include "astra_log.hpp"
 
 #include "emmc_flash_image.hpp"
 #include "spi_flash_image.hpp"
+#include "nand_flash_image.hpp"
 
 const std::string FlashImageTypeToString(FlashImageType type)
 {
@@ -49,6 +52,8 @@ FlashImageType StringToFlashImageType(const std::string& str)
 
 std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath, std::map<std::string, std::string> &config, std::string manifest)
 {
+    ASTRA_LOG;
+
     if (manifest == "") {
         manifest = imagePath + "/manifest.yaml";
     }
@@ -106,9 +111,13 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
         }
         manifestMaps->push_back(configMap);
     } catch (const YAML::BadFile& e) {
-        ;; // No manifest file, but we might have command line values
+        // No manifest file, but we might have command line values
+        log(ASTRA_LOG_LEVEL_DEBUG) << "No manifest file found at: " << manifest << endLog;
+    } catch (const YAML::Exception& e) {
+        // Invalid YAML syntax
+        log(ASTRA_LOG_LEVEL_WARNING) << "Invalid manifest file: " << e.what() << endLog;
     } catch (const std::exception& e) {
-        throw std::invalid_argument("Invalid Manifest");
+        log(ASTRA_LOG_LEVEL_WARNING) << "Error parsing manifest: " << e.what() << endLog;
     }
 
     std::string bootImage = configMap["boot_image"];
@@ -171,11 +180,25 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
     }
 
     if (flashImageType == FLASH_IMAGE_TYPE_UNKNOWN) {
-        if (std::filesystem::exists(imagePath) && std::filesystem::is_directory(imagePath)
-          && std::filesystem::exists(imagePath + "/emmc_part_list"))
-        {
-            // Image matches the structure of an eMMC image
-            flashImageType = FLASH_IMAGE_TYPE_EMMC;
+        if (std::filesystem::exists(imagePath) && std::filesystem::is_directory(imagePath)) {
+            // Check for NAND image by looking for a Yocto TAG file containing "nand"
+            for (const auto& entry : std::filesystem::directory_iterator(imagePath)) {
+                std::string filename = entry.path().filename().string();
+                if (filename.find("TAG--") != std::string::npos &&
+                    filename.find("astra") != std::string::npos &&
+                    filename.find("nand") != std::string::npos)
+                {
+                    flashImageType = FLASH_IMAGE_TYPE_NAND;
+                    break;
+                }
+            }
+
+            // Check for eMMC image by looking for the partition list file
+            if (flashImageType == FLASH_IMAGE_TYPE_UNKNOWN &&
+                std::filesystem::exists(imagePath + "/emmc_part_list"))
+            {
+                flashImageType = FLASH_IMAGE_TYPE_EMMC;
+            }
         }
     }
 
@@ -189,11 +212,81 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
             return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
                         memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));
         case FLASH_IMAGE_TYPE_NAND:
-            throw std::invalid_argument("NAND FlashImage not supported");
+            return std::make_shared<NandFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
+                        memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));
         case FLASH_IMAGE_TYPE_EMMC:
             return std::make_shared<EmmcFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
                 memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));
         default:
             throw std::invalid_argument("Unknown FlashImageType");
     }
+}
+
+ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const std::string& currentChipName)
+{
+    ASTRA_LOG;
+    ChipDetectionResult result;
+
+    if (!std::filesystem::exists(imagePath) || !std::filesystem::is_directory(imagePath)) {
+        return result;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(imagePath)) {
+        std::string filename = entry.path().filename().string();
+        if ((filename.find("TAG--") != std::string::npos) && (filename.find("astra") != std::string::npos)) {
+            // Yocto builds create a TAG file in the image directory. The name of the file
+            // contains the chip name and image name. We use this to determine the chip name
+            // and secure boot version if not provided in the config.
+
+            std::size_t pos = filename.find("sl");
+            if (pos != std::string::npos && pos + 6 <= filename.size()) {
+                std::string potentialChipName = filename.substr(pos, 6);
+                if (potentialChipName.size() == 6 && std::isdigit(potentialChipName[2]) && std::isdigit(potentialChipName[3]) &&
+                    std::isdigit(potentialChipName[4]) && std::isdigit(potentialChipName[5]))
+                {
+                    bool chipMismatch = !currentChipName.empty() &&
+                        (currentChipName.compare(0, 5, "sl261") == 0
+                            ? potentialChipName.compare(0, 5, currentChipName, 0, 5) != 0
+                            : potentialChipName != currentChipName);
+                    if (chipMismatch) {
+                        log(ASTRA_LOG_LEVEL_WARNING) << "TAG file chip name: " << potentialChipName <<
+                            " does not match chip in config: " << currentChipName << endLog;
+                        continue;
+                    }
+
+                    if (potentialChipName == "sl1680") {
+                        result.chipName = potentialChipName;
+                        result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
+                        result.memoryLayout = ASTRA_MEMORY_LAYOUT_4GB;
+                        result.found = true;
+                        log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
+                    }
+                    else if (potentialChipName == "sl1640") {
+                        result.chipName = potentialChipName;
+                        result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
+                        result.memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                        result.found = true;
+                        log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
+                    }
+                    else if (potentialChipName == "sl1620") {
+                        result.chipName = potentialChipName;
+                        result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
+                        result.memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                        result.found = true;
+                        log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
+                    }
+                    else if (potentialChipName.compare(0, 5, "sl261") == 0) {
+                        result.chipName = "sl2610";
+                        result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
+                        result.memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                        result.found = true;
+                        log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    return result;
 }

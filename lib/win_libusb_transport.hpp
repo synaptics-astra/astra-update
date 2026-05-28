@@ -10,14 +10,13 @@
 #include <set>
 #include <string>
 
-#include "usb_transport.hpp"
-#include "usb_device.hpp"
+#include "libusb_transport.hpp"
 
-class WinUSBTransport : public USBTransport {
+class WinLibUSBTransport : public LibUSBTransport {
 public:
-    WinUSBTransport(bool usbDebug) : USBTransport(usbDebug), m_hWnd(nullptr), m_hDevNotify(nullptr), m_hCriticalSectionMutex(nullptr) {};
-    ~WinUSBTransport() override;
-    int Init(uint16_t vendorId, uint16_t productId, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback) override;
+    WinLibUSBTransport(bool usbDebug) : LibUSBTransport(usbDebug), m_hWnd(nullptr), m_hDevNotify(nullptr), m_hCriticalSectionMutex(nullptr) {};
+    ~WinLibUSBTransport() override;
+    int Init(std::vector<USBVendorProductId> vendorProductIds, const std::string filterPorts, std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback) override;
     void Shutdown() override;
 
     bool BlockDeviceEnumeration() override;

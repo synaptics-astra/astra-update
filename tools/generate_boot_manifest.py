@@ -79,6 +79,10 @@ def main():
     parser.add_argument('--secure_boot')
     parser.add_argument('--vendor_id', default='06CB')
     parser.add_argument('--product_id')
+    parser.add_argument('--sysmgr_vendor_id', default=None, help='SysMgr USB vendor ID (hex, e.g. 06CB)')
+    parser.add_argument('--sysmgr_product_id', default=None, help='SysMgr USB product ID (hex)')
+    parser.add_argument('--fastboot_vendor_id', default=None, help='Fastboot USB vendor ID (hex, e.g. 18D1)')
+    parser.add_argument('--fastboot_product_id', default=None, help='Fastboot USB product ID (hex, e.g. D00D)')
     parser.add_argument('--console')
     parser.add_argument('--uenv_support')
     parser.add_argument('--memory_layout')
@@ -146,6 +150,14 @@ ddr_type: {ddr_type}
 uboot: {uboot}
 uboot_version: \"{uboot_version}\"
 """
+
+    if args.sysmgr_vendor_id and args.sysmgr_product_id:
+        yaml_content += f"sysmgr_vendor_id: {args.sysmgr_vendor_id}\n"
+        yaml_content += f"sysmgr_product_id: {args.sysmgr_product_id}\n"
+
+    if args.fastboot_vendor_id and args.fastboot_product_id:
+        yaml_content += f"fastboot_vendor_id: {args.fastboot_vendor_id}\n"
+        yaml_content += f"fastboot_product_id: {args.fastboot_product_id}\n"
 
     with open(args.output, 'w') as file:
         file.write(yaml_content)

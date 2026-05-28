@@ -1,0 +1,281 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2025 Synaptics Incorporated
+
+#include <iostream>
+#include <iomanip>
+#include <libusb-1.0/libusb.h>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <set>
+#include <string>
+#include <sstream>
+
+#include "libusb_transport.hpp"
+#include "astra_log.hpp"
+
+LibUSBTransport::~LibUSBTransport()
+{
+    ASTRA_LOG;
+    Shutdown();
+
+    if (m_ctx) {
+        libusb_exit(m_ctx);
+        m_ctx = nullptr;
+    }
+}
+
+void LibUSBTransport::DeviceMonitorThread()
+{
+    ASTRA_LOG;
+
+    int ret;
+
+    while (m_running.load()) {
+        struct timeval tv = { 0, 100000 }; // 100 ms – reduces worst-case delay when synchronous ReadBulk
+        ret = libusb_handle_events_timeout_completed(m_ctx, &tv, nullptr);
+        if (ret < 0) {
+            if (ret == LIBUSB_ERROR_INTERRUPTED) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "libusb_handle_events_timeout_completed interrupted" << endLog;
+                continue;
+            }
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to handle events: " << libusb_error_name(ret) << endLog;
+            break;
+        }
+    }
+}
+
+// Windows overrides this function in win_usb_transport.cpp. Add code which needs to run on Windows to that function as well.
+int LibUSBTransport::Init(std::vector<USBVendorProductId> vendorProductIds, const std::string filterPorts,
+    std::function<void(std::unique_ptr<USBDevice>)> deviceAddedCallback)
+{
+    ASTRA_LOG;
+
+    if (vendorProductIds.empty()) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Vendor/product ID list cannot be empty" << endLog;
+        return -1;
+    }
+
+    m_supportedDevices = vendorProductIds;
+
+    m_filterPorts = ParseFilterPortString(filterPorts);
+
+    int ret = libusb_init(&m_ctx);
+    if (ret < 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to initialize libusb: " << libusb_error_name(ret) << endLog;
+    }
+
+    if (m_usbDebug) {
+        libusb_set_option(m_ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_DEBUG);
+    }
+
+    m_deviceAddedCallback = deviceAddedCallback;
+
+    m_running.store(true);
+    if (libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Hotplug is supported" << endLog;
+
+        for (const auto& [vid, pid] : m_supportedDevices) {
+            libusb_hotplug_callback_handle handle = 0;
+            ret = libusb_hotplug_register_callback(m_ctx,
+                                                    LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+                                                    LIBUSB_HOTPLUG_ENUMERATE,
+                                                    vid,
+                                                    pid,
+                                                    LIBUSB_HOTPLUG_MATCH_ANY,
+                                                    HotplugEventCallback,
+                                                    this,
+                                                    &handle);
+            if (ret == LIBUSB_SUCCESS) {
+                m_callbackHandles.push_back(handle);
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to register hotplug callback for VID:0x"
+                    << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << vid
+                    << " PID:0x" << std::setw(4) << std::setfill('0') << pid << std::dec
+                    << ": " << libusb_error_name(ret) << endLog;
+            }
+        }
+        ret = m_callbackHandles.empty() ? LIBUSB_ERROR_NOT_FOUND : LIBUSB_SUCCESS;
+
+    } else {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Hotplug is NOT supported" << endLog;
+    }
+
+    StartDeviceMonitor();
+
+    return ret;
+}
+
+void LibUSBTransport::Shutdown()
+{
+    ASTRA_LOG;
+
+    std::lock_guard<std::mutex> lock(m_shutdownMutex);
+    if (m_running.exchange(false)) {
+        for (auto h : m_callbackHandles) {
+            libusb_hotplug_deregister_callback(m_ctx, h);
+        }
+        m_callbackHandles.clear();
+
+        libusb_interrupt_event_handler(m_ctx);
+        if (m_deviceMonitorThread.joinable()) {
+            m_deviceMonitorThread.join();
+        }
+
+        // Stop the callback worker thread after the event thread has exited
+        // (no more devices will be enqueued at this point).
+        StopCallbackWorkerThread();
+    }
+}
+
+void LibUSBTransport::StopCallbackWorkerThread()
+{
+    m_callbackCV.notify_all();
+    if (m_callbackWorkerThread.joinable()) {
+        m_callbackWorkerThread.join();
+    }
+}
+
+void LibUSBTransport::StartDeviceMonitor()
+{
+    ASTRA_LOG;
+
+    m_deviceMonitorThread = std::thread(&LibUSBTransport::DeviceMonitorThread, this);
+    m_callbackWorkerThread = std::thread(&LibUSBTransport::CallbackWorkerThread, this);
+}
+
+void LibUSBTransport::CallbackWorkerThread()
+{
+    ASTRA_LOG;
+
+    while (m_running.load()) {
+        std::unique_ptr<USBDevice> device;
+        {
+            std::unique_lock<std::mutex> lock(m_callbackMutex);
+            m_callbackCV.wait(lock, [this] {
+                return !m_running.load() || !m_pendingCallbacks.empty();
+            });
+            if (!m_pendingCallbacks.empty()) {
+                device = std::move(m_pendingCallbacks.front());
+                m_pendingCallbacks.pop();
+            }
+        }
+        if (device) {
+            if (m_deviceAddedCallback) {
+                try {
+                    m_deviceAddedCallback(std::move(device));
+                } catch (const std::bad_function_call& e) {
+                    log(ASTRA_LOG_LEVEL_ERROR) << "Error in device added callback: " << e.what() << endLog;
+                }
+            } else {
+                log(ASTRA_LOG_LEVEL_ERROR) << "No device added callback" << endLog;
+            }
+        }
+    }
+}
+
+std::string LibUSBTransport::ConstructUSBPath(libusb_device *device)
+{
+    ASTRA_LOG;
+
+    std::stringstream portStream;
+    uint8_t portNumbers[8];
+    uint8_t bus = libusb_get_bus_number(device);
+    uint8_t port = libusb_get_port_number(device);
+    int numElementsInPath = libusb_get_port_numbers(device, portNumbers, 8);
+    portStream << static_cast<int>(bus) << "-";
+    if (numElementsInPath > 0) {
+        portStream << static_cast<int>(portNumbers[0]);
+        for (int i = 1; i < numElementsInPath; ++i) {
+            portStream << "." << static_cast<int>(portNumbers[i]);
+        }
+    }
+
+    log(ASTRA_LOG_LEVEL_DEBUG) << "USB Path: " << portStream.str() << endLog;
+    return portStream.str();
+}
+
+bool LibUSBTransport::IsValidPort(libusb_device *device, const std::string &devicePath)
+{
+    ASTRA_LOG;
+
+    if (m_filterPorts.empty()) {
+        return true;
+    }
+
+    for (const auto& port : m_filterPorts) {
+        if (devicePath.rfind(port, 0) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int LIBUSB_CALL LibUSBTransport::HotplugEventCallback(libusb_context *ctx, libusb_device *device,
+                                                libusb_hotplug_event event, void *user_data)
+{
+    ASTRA_LOG;
+
+    LibUSBTransport *transport = static_cast<LibUSBTransport*>(user_data);
+
+    libusb_device_descriptor desc;
+    int ret = libusb_get_device_descriptor(device, &desc);
+    if (ret < 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to get device descriptor" << endLog;
+        return 1;
+    }
+
+    if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
+        log(ASTRA_LOG_LEVEL_INFO) << "Device arrived: vid: 0x" << std::hex << std::uppercase << desc.idVendor << ", pid: 0x" << desc.idProduct << endLog;
+
+        log(ASTRA_LOG_LEVEL_INFO) << "Device matches image" << endLog;
+
+        log(ASTRA_LOG_LEVEL_INFO) << "Device Descriptor:" << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bLength: " << static_cast<int>(desc.bLength) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bDescriptorType: " << static_cast<int>(desc.bDescriptorType) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bcdUSB: " << desc.bcdUSB << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bDeviceClass: " << static_cast<int>(desc.bDeviceClass) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bDeviceSubClass: " << static_cast<int>(desc.bDeviceSubClass) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bDeviceProtocol: " << static_cast<int>(desc.bDeviceProtocol) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bMaxPacketSize0: " << static_cast<int>(desc.bMaxPacketSize0) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  idVendor: 0x" << std::hex << std::setw(4) << std::setfill('0') << desc.idVendor << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  idProduct: 0x" << std::hex << std::setw(4) << std::setfill('0') << desc.idProduct << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bcdDevice: " << desc.bcdDevice << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  iManufacturer: " << static_cast<int>(desc.iManufacturer) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  iProduct: " << static_cast<int>(desc.iProduct) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  iSerialNumber: " << static_cast<int>(desc.iSerialNumber) << endLog;
+        log(ASTRA_LOG_LEVEL_INFO) << "  bNumConfigurations: " << static_cast<int>(desc.bNumConfigurations) << endLog;
+
+        std::string usbPath = transport->ConstructUSBPath(device);
+        if (!transport->IsValidPort(device, usbPath)) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Device is not on a port we are monitoring" << endLog;
+            return 0;
+        }
+
+        // Validate device is accessible before passing to callback
+        // If the device is in a bad state (e.g., kernel failed to configure it),
+        // skip it and wait for re-enumeration
+        libusb_device_handle *handle = nullptr;
+        ret = libusb_open(device, &handle);
+        if (ret < 0) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Device not accessible (" << libusb_error_name(ret)
+                << "), skipping and waiting for re-enumeration" << endLog;
+            return 0;
+        }
+
+        std::unique_ptr<USBDevice> usbDevice = std::make_unique<LibUSBDevice>(device, usbPath, transport->m_ctx, handle);
+        // Enqueue for the callback worker thread instead of calling directly.
+        // The hotplug callback runs on the libusb event thread; calling user code
+        // (which may invoke Write() and block on a condition variable) from here
+        // would deadlock because the event thread would be unable to process the
+        // transfer-completion event needed to unblock Write().
+        {
+            std::lock_guard<std::mutex> lk(transport->m_callbackMutex);
+            transport->m_pendingCallbacks.push(std::move(usbDevice));
+        }
+        transport->m_callbackCV.notify_one();
+    }
+
+    return 0;
+}

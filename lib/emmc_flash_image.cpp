@@ -34,46 +34,25 @@ int EmmcFlashImage::Load()
                 (filename.find("subimg") != std::string::npos))
             {
                 m_images.push_back(std::move(Image(entry.path().string(), ASTRA_IMAGE_TYPE_UPDATE_EMMC)));
-            } else if ((filename.find("TAG--") != std::string::npos) && (filename.find("astra") != std::string::npos)) {
-                // Yocto builds create a TAG file in the image directory. The name of the file
-                // contains the chip name and image name. We use this to determine the chip name
-                // and secure boot version if not provided in the config.
-
-                std::size_t pos = filename.find("sl");
-                if (pos != std::string::npos && pos + 6 <= filename.size()) {
-                    std::string potentialChipName = filename.substr(pos, 6);
-                    if (potentialChipName.size() == 6 && std::isdigit(potentialChipName[2]) && std::isdigit(potentialChipName[3]) &&
-                        std::isdigit(potentialChipName[4]) && std::isdigit(potentialChipName[5]))
-                    {
-                        if (!m_chipName.empty() && potentialChipName != m_chipName) {
-                            log(ASTRA_LOG_LEVEL_WARNING) << "Image tag chip name: " << potentialChipName <<
-                                "chip name in config" << m_chipName << endLog;
-                            continue;
-                        }
-                        if (m_chipName.empty() && potentialChipName == "sl1680") {
-                            m_chipName = potentialChipName;
-                            m_secureBootVersion = ASTRA_SECURE_BOOT_V3;
-                            m_memoryLayout = ASTRA_MEMORY_LAYOUT_4GB;
-                            log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
-                        }
-                        else if (m_chipName.empty() && potentialChipName == "sl1640") {
-                            m_chipName = potentialChipName;
-                            m_secureBootVersion = ASTRA_SECURE_BOOT_V3;
-                            m_memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
-                            log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
-                        }
-                        else if (m_chipName.empty() && potentialChipName == "sl1620") {
-                            m_chipName = potentialChipName;
-                            m_secureBootVersion = ASTRA_SECURE_BOOT_V3;
-                            m_memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
-                            log(ASTRA_LOG_LEVEL_INFO) << "Detected that this image is for chip: " << m_chipName << endLog;
-                        }
-                    }
-                }
             }
+            // TAG-- files are handled separately by DetectChipFromTagFile() below.
         }
     }
 
+
+    // Detect chip info from TAG file if chip name not already set
+    if (m_chipName.empty()) {
+        try {
+            ChipDetectionResult detection = DetectChipFromTagFile(m_imagePath, m_chipName);
+            if (detection.found) {
+                m_chipName = detection.chipName;
+                m_secureBootVersion = detection.secureBootVersion;
+                m_memoryLayout = detection.memoryLayout;
+            }
+        } catch (const std::exception& e) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Failed to detect chip from TAG file: " << e.what() << endLog;
+        }
+    }
     ParseEmmcImageList();
 
     return ret;
