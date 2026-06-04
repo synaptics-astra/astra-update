@@ -179,6 +179,13 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
         memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
     }
 
+    // Set board-specific DDR type defaults when not explicitly configured
+    if (memoryDDRType == ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED) {
+        if (boardName == "coralboard") {
+            memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
+        }
+    }
+
     if (flashImageType == FLASH_IMAGE_TYPE_UNKNOWN) {
         if (std::filesystem::exists(imagePath) && std::filesystem::is_directory(imagePath)) {
             // Check for NAND image by looking for a Yocto TAG file containing "nand"
@@ -254,10 +261,20 @@ ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const st
                         continue;
                     }
 
+                    // Extract board name from the part of the filename after the chip name.
+                    // e.g. TAG--astra-media-sl2619-coralboard.rootfs-... -> "coralboard"
+                    std::size_t boardPos = pos + 6;
+                    if (boardPos < filename.size() && filename[boardPos] == '-') {
+                        std::string boardRemainder = filename.substr(boardPos + 1);
+                        std::size_t dotPos = boardRemainder.find('.');
+                        result.boardName = boardRemainder.substr(0, dotPos);
+                    }
+
                     if (potentialChipName == "sl1680") {
                         result.chipName = potentialChipName;
                         result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
                         result.memoryLayout = ASTRA_MEMORY_LAYOUT_4GB;
+                        result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_LPDDR4X;
                         result.found = true;
                         log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
                     }
@@ -265,6 +282,7 @@ ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const st
                         result.chipName = potentialChipName;
                         result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
                         result.memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                        result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_LPDDR4;
                         result.found = true;
                         log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
                     }
@@ -272,13 +290,20 @@ ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const st
                         result.chipName = potentialChipName;
                         result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
                         result.memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                        result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4;
                         result.found = true;
                         log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
                     }
                     else if (potentialChipName.compare(0, 5, "sl261") == 0) {
-                        result.chipName = "sl2610";
+                        result.chipName = potentialChipName;
                         result.secureBootVersion = ASTRA_SECURE_BOOT_V3;
                         result.memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+                        // Set board-specific DDR type defaults
+                        if (result.boardName == "coralboard") {
+                            result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
+                        } else {
+                            result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4;
+                        }
                         result.found = true;
                         log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
                     }

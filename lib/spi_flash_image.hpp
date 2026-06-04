@@ -26,9 +26,12 @@ private:
                 // Overwrite default config values for SL2610 series.
                 readAddress = "0x10000000";
                 writeFirstCopyAddress = "0";
-                writeLength = "0x200000";
+                writeSecondCopyAddress = "0x200000";
+                writeLength = "$filesize";
                 eraseFirstStartAddress = "0";
                 eraseFirstLength = "0x200000";
+                eraseSecondStartAddress = "0x200000";
+                eraseSecondLength = "0x200000";
             }
         }
         std::string imageFile;

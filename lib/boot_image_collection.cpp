@@ -75,33 +75,46 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
 {
     ASTRA_LOG;
 
+    // For SL261x variants (where x > 0), collect candidate chip names: exact match first, then series fallback.
+    std::vector<std::string> chipNamesToTry = { chipName };
+    if (chipName.size() == 6 && chipName.compare(0, 5, "sl261") == 0 && chipName[5] > '0') {
+        chipNamesToTry.push_back("sl2610");
+    }
+
     std::vector<std::shared_ptr<AstraBootImage>> bootImages;
 
-    for (const auto& bootImage : m_bootImages) {
-        if (bootImage->GetChipName() == chipName && bootImage->GetSecureBootVersion() == secureBoot
-          && bootImage->GetMemoryLayout() == memoryLayout)
-        {
-            bool boardImageMatch = false;
+    for (const auto& candidateChipName : chipNamesToTry) {
+        for (const auto& bootImage : m_bootImages) {
+            if (bootImage->GetChipName() == candidateChipName && bootImage->GetSecureBootVersion() == secureBoot
+              && bootImage->GetMemoryLayout() == memoryLayout)
+            {
+                bool boardImageMatch = false;
 
-             if (boardName.empty()) {
-                boardImageMatch = true;
-            } else if (bootImage->GetBoardName() == boardName) {
-                boardImageMatch = true;
-            }
+                if (boardName.empty()) {
+                    boardImageMatch = true;
+                } else if (bootImage->GetBoardName() == boardName) {
+                    boardImageMatch = true;
+                }
 
-            // If DDR Type is not set to a specific value then do
-            // not use it for matching.
-            if (memoryDDRType == ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED) {
-                boardImageMatch = true;
-            } else if (bootImage->GetMemoryDDRType() == memoryDDRType) {
-                boardImageMatch = true;
-            } else {
-                boardImageMatch = false;
-            }
+                // If DDR Type is not set to a specific value then do
+                // not use it for matching.
+                if (memoryDDRType == ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED) {
+                    boardImageMatch = true;
+                } else if (bootImage->GetMemoryDDRType() == memoryDDRType) {
+                    boardImageMatch = true;
+                } else {
+                    boardImageMatch = false;
+                }
 
-            if (boardImageMatch) {
-                bootImages.push_back(bootImage);
+                if (boardImageMatch) {
+                    bootImages.push_back(bootImage);
+                }
             }
+        }
+
+        // If we found matches with the exact chip name, do not try the series fallback.
+        if (!bootImages.empty()) {
+            break;
         }
     }
 

@@ -110,7 +110,8 @@ int SpiFlashImage::Load()
         log(ASTRA_LOG_LEVEL_DEBUG) << "Using SL2610 SPI flash command sequence" << endLog;
         for (const auto &imageConfig : m_spiImageConfigs) {
              m_flashCommand += "usbload "  + imageConfig.imageFile + " " + imageConfig.readAddress + "; sf probe; sf erase " + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength
-                + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress + " " + imageConfig.writeLength;
+                + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress + " " + imageConfig.writeLength + "; sf erase " + imageConfig.eraseSecondStartAddress
+                + " " + imageConfig.eraseSecondLength + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress + " " + imageConfig.writeLength + "; ";
         }
         log(ASTRA_LOG_LEVEL_DEBUG) << "Copy flash command: " << m_flashCommand << endLog;
     } else {
