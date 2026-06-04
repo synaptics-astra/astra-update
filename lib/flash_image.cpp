@@ -302,7 +302,7 @@ ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const st
                         if (result.boardName == "coralboard") {
                             result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
                         } else {
-                            result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4X16;
+                            result.memoryDDRType = ASTRA_MEMORY_DDR_TYPE_DDR4;
                         }
                         result.found = true;
                         log(ASTRA_LOG_LEVEL_INFO) << "Detected image is for chip: " << result.chipName << endLog;
