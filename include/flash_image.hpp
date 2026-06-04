@@ -63,8 +63,10 @@ protected:
 
 struct ChipDetectionResult {
     std::string chipName;
+    std::string boardName;
     AstraSecureBootVersion secureBootVersion = ASTRA_SECURE_BOOT_V3;
     AstraMemoryLayout memoryLayout = ASTRA_MEMORY_LAYOUT_2GB;
+    AstraMemoryDDRType memoryDDRType = ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED;
     bool found = false;
 };
 

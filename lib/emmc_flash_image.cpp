@@ -48,6 +48,7 @@ int EmmcFlashImage::Load()
                 m_chipName = detection.chipName;
                 m_secureBootVersion = detection.secureBootVersion;
                 m_memoryLayout = detection.memoryLayout;
+                m_memoryDDRType = detection.memoryDDRType;
             }
         } catch (const std::exception& e) {
             log(ASTRA_LOG_LEVEL_WARNING) << "Failed to detect chip from TAG file: " << e.what() << endLog;
