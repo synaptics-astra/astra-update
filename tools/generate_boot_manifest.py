@@ -13,6 +13,31 @@ import argparse
 import subprocess
 import re
 
+
+def extract_chip_from_product_name(line):
+    match = re.search(r'CONFIG_PRODUCT_NAME="[^"]*(sl\d{4})[^"]*"', line, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+    return None
+
+
+def extract_board_from_product_name(line):
+    arch_tokens = {'aarch64', 'aarch32', 'arm64', 'armhf'}
+    match = re.search(r'CONFIG_PRODUCT_NAME="([^"]+)"', line)
+    if not match:
+        return None
+
+    product_name = match.group(1).lower()
+    arch_match = re.search(r'_(aarch64|aarch32|arm64|armhf)_([^_"]+)$', product_name)
+    if arch_match:
+        return arch_match.group(2)
+
+    parts = product_name.split('_')
+    if len(parts) > 1 and re.fullmatch(r'sl\d{4}', parts[0]) and parts[-1] not in arch_tokens:
+        return parts[-1]
+
+    return None
+
 def extract_uboot_version(file_path):
     try:
         result = subprocess.run(['strings', file_path], capture_output=True, text=True, check=True)
@@ -35,7 +60,14 @@ def parse_sdk_config(file_path):
     try:
         with open(file_path) as f:
             for line in f:
-                if 'CONFIG_GENX_ENABLE=y' in line:
+                if 'CONFIG_PRODUCT_NAME' in line:
+                    product_chip = extract_chip_from_product_name(line)
+                    product_board = extract_board_from_product_name(line)
+                    if product_chip:
+                        chip = product_chip
+                    if product_board:
+                        board = product_board
+                elif 'CONFIG_GENX_ENABLE=y' in line:
                     secure_boot = 'genx'
                 elif 'CONFIG_BERLIN_DOLPHIN_A0=y' in line:
                     chip = 'sl1680'
@@ -43,12 +75,11 @@ def parse_sdk_config(file_path):
                     chip = 'sl1640'
                 elif 'CONFIG_BERLIN_MYNA2_A0=y' in line:
                     chip = 'sl1620'
-                 elif 'CONFIG_BERLIN_KLAMATH=y' in line:
-+                    chip = 'sl2619'
-                elif 'CONFIG_BOARD_NAME' in line and 'RDK' in line:
-                    board = 'rdk'
+                elif 'CONFIG_BERLIN_KLAMATH=y' in line:
+                    # chip name should have already been extracted from CONFIG_PRODUCT_NAME
+                    pass
                 elif 'CONFIG_UBOOT_SUBOOT=y' in line:
-                        uboot = 'suboot'
+                    uboot = 'suboot'
                 else:
                     match = re.search(r'CONFIG_PREBOOT_MEMORY_SIZE="(\d+GB)"', line)
                     if match:
@@ -87,6 +118,8 @@ def main():
     parser.add_argument('--fastboot_product_id', default=None, help='Fastboot USB product ID (hex, e.g. D00D)')
     parser.add_argument('--console')
     parser.add_argument('--uenv_support')
+    parser.add_argument('--nand_support', default=None, help='Whether NAND boot is supported (true/false)')
+    parser.add_argument('--transport', default=None, help='Boot image transport type (usb or usb_cdc)')
     parser.add_argument('--memory_layout')
     parser.add_argument('--ddr-type')
     parser.add_argument('--uboot')
@@ -128,14 +161,31 @@ def main():
 
     product_id = args.product_id
     if not product_id:
-      if chip == "sl1680":
-        product_id = "00B1"
-      elif chip == "sl1640":
-        product_id = "00B0"
-      elif chip == "sl1620":
-        product_id = "00B2"
-      elif chip == "sl2619":
-        product_id = "00B3"
+        if chip == "sl1680":
+            product_id = "00B1"
+        elif chip == "sl1640":
+            product_id = "00B0"
+        elif chip == "sl1620":
+            product_id = "00B2"
+        elif chip and chip.startswith("sl26"):
+            product_id = "019E"
+
+    sysmgr_vendor_id = args.sysmgr_vendor_id
+    sysmgr_product_id = args.sysmgr_product_id
+    fastboot_vendor_id = args.fastboot_vendor_id
+    fastboot_product_id = args.fastboot_product_id
+    nand_support = args.nand_support
+    transport = args.transport
+
+    if chip and chip.startswith("sl26"):
+        sysmgr_vendor_id = sysmgr_vendor_id or "CAFE"
+        sysmgr_product_id = sysmgr_product_id or "4002"
+        fastboot_vendor_id = fastboot_vendor_id or "18D1"
+        fastboot_product_id = fastboot_product_id or "4EE0"
+        console = console or "uart"
+        uenv_support = uenv_support or "true"
+        nand_support = nand_support or "false"
+        transport = transport or "usb_cdc"
 
     if not chip or not secure_boot or not product_id or not console:
         print("Required value is missing")
@@ -155,13 +205,19 @@ uboot: {uboot}
 uboot_version: \"{uboot_version}\"
 """
 
-    if args.sysmgr_vendor_id and args.sysmgr_product_id:
-        yaml_content += f"sysmgr_vendor_id: {args.sysmgr_vendor_id}\n"
-        yaml_content += f"sysmgr_product_id: {args.sysmgr_product_id}\n"
+    if sysmgr_vendor_id and sysmgr_product_id:
+        yaml_content += f"sysmgr_vendor_id: {sysmgr_vendor_id}\n"
+        yaml_content += f"sysmgr_product_id: {sysmgr_product_id}\n"
 
-    if args.fastboot_vendor_id and args.fastboot_product_id:
-        yaml_content += f"fastboot_vendor_id: {args.fastboot_vendor_id}\n"
-        yaml_content += f"fastboot_product_id: {args.fastboot_product_id}\n"
+    if fastboot_vendor_id and fastboot_product_id:
+        yaml_content += f"fastboot_vendor_id: {fastboot_vendor_id}\n"
+        yaml_content += f"fastboot_product_id: {fastboot_product_id}\n"
+
+    if nand_support is not None:
+        yaml_content += f"nand_support: {nand_support}\n"
+
+    if transport:
+        yaml_content += f"transport: {transport}\n"
 
     with open(args.output, 'w') as file:
         file.write(yaml_content)
