@@ -43,6 +43,8 @@ def parse_sdk_config(file_path):
                     chip = 'sl1640'
                 elif 'CONFIG_BERLIN_MYNA2_A0=y' in line:
                     chip = 'sl1620'
+                 elif 'CONFIG_BERLIN_KLAMATH=y' in line:
++                    chip = 'sl2619'
                 elif 'CONFIG_BOARD_NAME' in line and 'RDK' in line:
                     board = 'rdk'
                 elif 'CONFIG_UBOOT_SUBOOT=y' in line:
@@ -132,6 +134,8 @@ def main():
         product_id = "00B0"
       elif chip == "sl1620":
         product_id = "00B2"
+      elif chip == "sl2619":
+        product_id = "00B3"
 
     if not chip or not secure_boot or not product_id or not console:
         print("Required value is missing")
