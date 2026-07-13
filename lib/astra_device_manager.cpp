@@ -123,6 +123,8 @@ public:
             }
         }
 
+        log(ASTRA_LOG_LEVEL_INFO) << "Selected boot image: " << m_bootImage->GetChipName() << " " << m_bootImage->GetBoardName() << " (" << m_bootImage->GetID() << ")" << endLog;
+
         Init();
     }
 
