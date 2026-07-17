@@ -17,6 +17,7 @@ enum AstraMemoryLayout {
     ASTRA_MEMORY_LAYOUT_2GB = 1,
     ASTRA_MEMORY_LAYOUT_3GB = 2,
     ASTRA_MEMORY_LAYOUT_4GB = 3,
+    ASTRA_MEMORY_LAYOUT_512MB = 4,
 };
 
 enum AstraMemoryDDRType {
@@ -103,6 +104,8 @@ static std::string AstraMemoryLayoutToString(AstraMemoryLayout memoryLayout)
             return "3GB";
         case ASTRA_MEMORY_LAYOUT_4GB:
             return "4GB";
+        case ASTRA_MEMORY_LAYOUT_512MB:
+            return "512MB";
         default:
             return "unknown";
     }

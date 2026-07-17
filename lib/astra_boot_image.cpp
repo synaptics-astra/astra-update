@@ -59,6 +59,8 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             m_memoryLayout = ASTRA_MEMORY_LAYOUT_3GB;
         } else if (memoryLayoutString == "4gb") {
             m_memoryLayout = ASTRA_MEMORY_LAYOUT_4GB;
+        } else if (memoryLayoutString == "512mb") {
+            m_memoryLayout = ASTRA_MEMORY_LAYOUT_512MB;
         } else {
             throw std::runtime_error("Invalid memory layout");
         }
