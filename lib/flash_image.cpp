@@ -157,6 +157,8 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
             memoryLayout = ASTRA_MEMORY_LAYOUT_3GB;
         } else if (memoryLayoutString == "4gb") {
             memoryLayout = ASTRA_MEMORY_LAYOUT_4GB;
+        } else if (memoryLayoutString == "512mb") {
+            memoryLayout = ASTRA_MEMORY_LAYOUT_512MB;
         } else {
             throw std::invalid_argument("Invalid Memory Layout");
         }
