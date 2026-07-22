@@ -83,7 +83,7 @@ int NandFlashImage::Load()
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND image file: " << m_imageFile << endLog;
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND read address: " << m_nandReadAddress << endLog;
 
-    m_flashCommand = "usbload " + m_nandReadAddress + " " + m_imageFile
+    m_flashCommand = "usbload " + m_imageFile + " " + m_nandReadAddress
         + "; m2nand " + m_nandReadAddress;
 
     if (m_resetWhenComplete) {
