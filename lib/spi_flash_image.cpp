@@ -106,16 +106,8 @@ int SpiFlashImage::Load()
     }
 
     // Flash primary and secondary copies of the SPI U-Boot image
-    if (m_chipName.compare(0, 5, "sl261") == 0) {
-        log(ASTRA_LOG_LEVEL_DEBUG) << "Using SL2610 SPI flash command sequence" << endLog;
-        for (const auto &imageConfig : m_spiImageConfigs) {
-             m_flashCommand += "usbload "  + imageConfig.imageFile + " " + imageConfig.readAddress + "; sf probe; sf erase " + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength
-                + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress + " " + imageConfig.writeLength + "; sf erase " + imageConfig.eraseSecondStartAddress
-                + " " + imageConfig.eraseSecondLength + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress + " " + imageConfig.writeLength + "; ";
-        }
-        log(ASTRA_LOG_LEVEL_DEBUG) << "Copy flash command: " << m_flashCommand << endLog;
-    } else {
-        log(ASTRA_LOG_LEVEL_DEBUG) << "Using default SPI flash command sequence" << endLog;
+    if (m_ubootVersion == ASTRA_UBOOT_VERSION_2019_10) {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Using U-Boot 2019.10 SPI flash command sequence" << endLog;
         for (const auto &imageConfig : m_spiImageConfigs) {
             m_flashCommand += "usbload " + imageConfig.imageFile + " " + imageConfig.readAddress + "; spinit; erase "
                 + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength + "; cp.b "
@@ -124,6 +116,14 @@ int SpiFlashImage::Load()
                 + imageConfig.eraseSecondStartAddress + " " + imageConfig.eraseSecondLength
                 + "; cp.b " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress
                 + " " + imageConfig.writeLength + "; ";
+        }
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Flash command: " << m_flashCommand << endLog;
+    } else {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Using U-Boot 2025.01 SPI flash command sequence" << endLog;
+        for (const auto &imageConfig : m_spiImageConfigs) {
+             m_flashCommand += "usbload "  + imageConfig.imageFile + " " + imageConfig.readAddress + "; sf probe; sf erase " + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength
+                + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress + " " + imageConfig.writeLength + "; sf erase " + imageConfig.eraseSecondStartAddress
+                + " " + imageConfig.eraseSecondLength + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress + " " + imageConfig.writeLength + "; ";
         }
         log(ASTRA_LOG_LEVEL_DEBUG) << "Flash command: " << m_flashCommand << endLog;
     }
