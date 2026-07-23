@@ -107,6 +107,36 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             m_ubootVariant = ASTRA_UBOOT_VARIANT_UNKNOWN;
         }
 
+        std::string ubootVersionString = manifest["uboot_version"].as<std::string>();
+        std::transform(ubootVersionString.begin(), ubootVersionString.end(), ubootVersionString.begin(), ::tolower);
+
+        // Extract "YYYY.MM" from a full U-Boot banner string like
+        // "u-boot 2025.01.20260718...-gSHA (Jul 18 2026 - ...)"
+        // or fall back to the raw string if no prefix is present.
+        std::string shortUbootVersion = ubootVersionString;
+        const std::string ubootPrefix = "u-boot ";
+        size_t prefixPos = ubootVersionString.find(ubootPrefix);
+        if (prefixPos != std::string::npos) {
+            shortUbootVersion = ubootVersionString.substr(prefixPos + ubootPrefix.size());
+        }
+        // Truncate to "YYYY.MM" by stopping at the character after the second dot
+        size_t firstDot = shortUbootVersion.find('.');
+        if (firstDot != std::string::npos) {
+            size_t secondDot = shortUbootVersion.find('.', firstDot + 1);
+            if (secondDot != std::string::npos) {
+                shortUbootVersion = shortUbootVersion.substr(0, secondDot);
+            }
+        }
+
+        if (shortUbootVersion == "2019.10") {
+            m_ubootVersion = ASTRA_UBOOT_VERSION_2019_10;
+        } else if (shortUbootVersion == "2025.01") {
+            m_ubootVersion = ASTRA_UBOOT_VERSION_2025_01;
+        } else {
+            m_ubootVersion = ASTRA_UBOOT_VERSION_UNKNOWN;
+        }
+
+
         log(ASTRA_LOG_LEVEL_INFO) << "Loaded boot bootImages: " << m_chipName << " " << m_boardName << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "ID: " << m_id << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Secure boot version: " << (m_secureBootVersion == ASTRA_SECURE_BOOT_V2 ? "gen2" : "genx") << endLog;

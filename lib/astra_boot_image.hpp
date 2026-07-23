@@ -21,6 +21,12 @@ enum AstraUbootVariant {
     ASTRA_UBOOT_VARIANT_SYNAPTICS,
 };
 
+enum AstraUbootVersion {
+    ASTRA_UBOOT_VERSION_UNKNOWN,
+    ASTRA_UBOOT_VERSION_2019_10,
+    ASTRA_UBOOT_VERSION_2025_01,
+};
+
 class AstraBootImage
 {
 public:
@@ -49,6 +55,7 @@ public:
     AstraTransportType GetTransportType() const { return m_transportType; }
     const std::vector<Image>& GetImages() const { return m_images; }
     AstraUbootVariant GetUbootVariant() const { return m_ubootVariant; }
+    AstraUbootVersion GetUbootVersion() const { return m_ubootVersion; }
     const std::string GetFinalBootImage() const { return m_finalBootImage; }
     bool IsLinuxBoot() const { return m_linuxBoot; }
     AstraDeviceBootStage GetDefaultBootStage() const { return m_defaultBootStage; }
@@ -73,6 +80,7 @@ private:
     uint16_t m_fastbootVendorId = 0;
     uint16_t m_fastbootProductId = 0;
     AstraUbootVariant m_ubootVariant;
+    AstraUbootVersion m_ubootVersion;
     std::string m_finalBootImage;
     bool m_linuxBoot = false;
     AstraDeviceBootStage m_defaultBootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
