@@ -17,6 +17,7 @@ public:
     {}
 
     int Load() override;
+    void OnUbootVersionChanged() override;
 
 private:
     struct SpiImageConfig {
@@ -47,4 +48,5 @@ private:
     std::vector<SpiImageConfig> m_spiImageConfigs;
 
     void ParseSpiFlashConfig(const std::map<std::string, std::string> &config, std::string imageFile);
+    void BuildFlashCommand();
 };

@@ -106,6 +106,22 @@ int SpiFlashImage::Load()
     }
 
     // Flash primary and secondary copies of the SPI U-Boot image
+    BuildFlashCommand();
+
+    return ret;
+}
+
+void SpiFlashImage::OnUbootVersionChanged()
+{
+    BuildFlashCommand();
+}
+
+void SpiFlashImage::BuildFlashCommand()
+{
+    ASTRA_LOG;
+
+    m_flashCommand.clear();
+
     if (m_ubootVersion == ASTRA_UBOOT_VERSION_2019_10) {
         log(ASTRA_LOG_LEVEL_DEBUG) << "Using U-Boot 2019.10 SPI flash command sequence" << endLog;
         for (const auto &imageConfig : m_spiImageConfigs) {
@@ -131,6 +147,4 @@ int SpiFlashImage::Load()
     if (m_resetWhenComplete) {
         m_flashCommand += m_resetCommand;
     }
-
-    return ret;
 }
