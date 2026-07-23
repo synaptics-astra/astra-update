@@ -125,6 +125,9 @@ public:
 
         log(ASTRA_LOG_LEVEL_INFO) << "Selected boot image: " << m_bootImage->GetChipName() << " " << m_bootImage->GetBoardName() << " (" << m_bootImage->GetID() << ")" << endLog;
 
+        m_flashImage->SetUbootVersion(m_bootImage->GetUbootVersion());
+        m_bootCommand = m_flashImage->GetFlashCommand();
+
         Init();
     }
 

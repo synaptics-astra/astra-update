@@ -108,6 +108,7 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         }
 
         std::string ubootVersionString = manifest["uboot_version"].as<std::string>();
+        log (ASTRA_LOG_LEVEL_DEBUG) << "U-Boot version string from manifest: " << ubootVersionString << endLog;
         std::transform(ubootVersionString.begin(), ubootVersionString.end(), ubootVersionString.begin(), ::tolower);
 
         // Extract "YYYY.MM" from a full U-Boot banner string like
@@ -135,6 +136,7 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
         } else {
             m_ubootVersion = ASTRA_UBOOT_VERSION_UNKNOWN;
         }
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Detected U-Boot version: " << shortUbootVersion << endLog;
 
         log(ASTRA_LOG_LEVEL_INFO) << "Loaded boot bootImages: " << m_chipName << " " << m_boardName << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "ID: " << m_id << endLog;

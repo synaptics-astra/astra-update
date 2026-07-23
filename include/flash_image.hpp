@@ -41,7 +41,8 @@ public:
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
     AstraMemoryDDRType GetMemoryDDRType() const { return m_memoryDDRType; }
     AstraUbootVersion GetUbootVersion() const { return m_ubootVersion; }
-    void SetUbootVersion(AstraUbootVersion ubootVersion) { m_ubootVersion = ubootVersion; }
+    void SetUbootVersion(AstraUbootVersion ubootVersion) { m_ubootVersion = ubootVersion; OnUbootVersionChanged(); }
+    virtual void OnUbootVersionChanged() {}
     const std::vector<Image>& GetImages() const { return m_images; }
     FlashImageType GetFlashImageType() const { return m_flashImageType; }
     bool GetResetWhenComplete() const { return m_resetWhenComplete; }
