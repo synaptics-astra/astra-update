@@ -239,7 +239,7 @@ public:
         if (resolvedMode == SL26XXDeviceMode::SL26XX_DEVICE_MODE_BOOTROM) {
             if (!RunSpkBootSequence(*bootImage)) {
                 m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
-                ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX key/spk/m52bl boot sequence");
+                ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX key/spk/key/m52bl boot sequence");
                 return -1;
             }
 
@@ -919,13 +919,18 @@ private:
         }
 
         log(ASTRA_LOG_LEVEL_INFO) << "SL26XX run-spk: uploading " << keyImage->GetName() << ", "
-                                  << spkImage->GetName() << ", and " << m52BlImage->GetName() << endLog;
+                                  << spkImage->GetName() << ", " << keyImage->GetName() << ", and "
+                                  << m52BlImage->GetName() << endLog;
 
         if (!SendSpkFile(keyImage->GetPath(), keyImage->GetName(), kOpcodeUploadKey)) {
             return false;
         }
 
         if (!SendSpkFile(spkImage->GetPath(), spkImage->GetName(), kOpcodeUploadSpk)) {
+            return false;
+        }
+
+        if (!SendSpkFile(keyImage->GetPath(), keyImage->GetName(), kOpcodeUploadKey)) {
             return false;
         }
 
