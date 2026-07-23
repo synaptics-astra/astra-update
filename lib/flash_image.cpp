@@ -219,7 +219,7 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
     switch (flashImageType) {
         case FLASH_IMAGE_TYPE_SPI:
             return std::make_shared<SpiFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
-                        memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));
+                        memoryLayout, memoryDDRType, ASTRA_UBOOT_VERSION_UNKNOWN, resetWhenComplete, std::move(manifestMaps));
         case FLASH_IMAGE_TYPE_NAND:
             return std::make_shared<NandFlashImage>(imagePath, bootImage, chipName, boardName, secureBootVersion,
                         memoryLayout, memoryDDRType, resetWhenComplete, std::move(manifestMaps));

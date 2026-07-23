@@ -136,7 +136,6 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             m_ubootVersion = ASTRA_UBOOT_VERSION_UNKNOWN;
         }
 
-
         log(ASTRA_LOG_LEVEL_INFO) << "Loaded boot bootImages: " << m_chipName << " " << m_boardName << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "ID: " << m_id << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Secure boot version: " << (m_secureBootVersion == ASTRA_SECURE_BOOT_V2 ? "gen2" : "genx") << endLog;

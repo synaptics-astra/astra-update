@@ -21,12 +21,6 @@ enum AstraUbootVariant {
     ASTRA_UBOOT_VARIANT_SYNAPTICS,
 };
 
-enum AstraUbootVersion {
-    ASTRA_UBOOT_VERSION_UNKNOWN,
-    ASTRA_UBOOT_VERSION_2019_10,
-    ASTRA_UBOOT_VERSION_2025_01,
-};
-
 class AstraBootImage
 {
 public:

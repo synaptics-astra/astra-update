@@ -21,9 +21,11 @@ class FlashImage
 {
 public:
     FlashImage(FlashImageType flashImageType, std::string imagePath, std::string bootImageId, std::string chipName,
-        std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType, bool resetWhenComplete,
+        std::string boardName, AstraSecureBootVersion secureBootVersion, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType,
+        AstraUbootVersion ubootVersion, bool resetWhenComplete,
         std::unique_ptr<std::vector<std::map<std::string, std::string>>> manifestMaps) : m_flashImageType{flashImageType}, m_imagePath{imagePath}, m_bootImageId{bootImageId},
-        m_chipName{chipName}, m_boardName{boardName}, m_secureBootVersion{secureBootVersion}, m_memoryLayout{memoryLayout}, m_memoryDDRType{memoryDDRType}, m_resetWhenComplete{resetWhenComplete}, m_manifestMaps{std::move(manifestMaps)}
+        m_chipName{chipName}, m_boardName{boardName}, m_secureBootVersion{secureBootVersion}, m_memoryLayout{memoryLayout}, m_memoryDDRType{memoryDDRType},
+        m_ubootVersion{ubootVersion}, m_resetWhenComplete{resetWhenComplete}, m_manifestMaps{std::move(manifestMaps)}
     {}
     virtual ~FlashImage()
     {}
@@ -38,6 +40,8 @@ public:
     AstraSecureBootVersion GetSecureBootVersion() const { return m_secureBootVersion; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
     AstraMemoryDDRType GetMemoryDDRType() const { return m_memoryDDRType; }
+    AstraUbootVersion GetUbootVersion() const { return m_ubootVersion; }
+    void SetUbootVersion(AstraUbootVersion ubootVersion) { m_ubootVersion = ubootVersion; }
     const std::vector<Image>& GetImages() const { return m_images; }
     FlashImageType GetFlashImageType() const { return m_flashImageType; }
     bool GetResetWhenComplete() const { return m_resetWhenComplete; }
@@ -52,6 +56,7 @@ protected:
     AstraSecureBootVersion m_secureBootVersion;
     AstraMemoryLayout m_memoryLayout;
     AstraMemoryDDRType m_memoryDDRType;
+    AstraUbootVersion m_ubootVersion;
     std::string m_imagePath;
     std::vector<Image> m_images;
     std::string m_flashCommand;
