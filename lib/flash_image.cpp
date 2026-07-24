@@ -91,19 +91,19 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
                             std::string imageName = imageEntry.first.as<std::string>();
                             YAML::Node imageProps = imageEntry.second;
 
-                            if (imageProps.IsMap()) {
-                                std::map<std::string, std::string> imageMap;
-                                imageMap["type"] = "image";
-                                imageMap["image_file"] = imageName;
+                            std::map<std::string, std::string> imageMap;
+                            imageMap["type"] = "image";
+                            imageMap["image_file"] = imageName;
 
+                            if (imageProps.IsMap()) {
                                 for (const auto& prop : imageProps) {
                                     std::string propName = prop.first.as<std::string>();
                                     std::string propVal = prop.second.as<std::string>();
                                     imageMap[propName] = propVal;
                                 }
-
-                                manifestMaps->push_back(imageMap);
                             }
+
+                            manifestMaps->push_back(imageMap);
                         }
                     }
                 }
