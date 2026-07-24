@@ -105,6 +105,11 @@ int SpiFlashImage::Load()
         }
     }
 
+    if (m_spiImageConfigs.empty()) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "No SPI images configured - check that manifest has an image_file entry" << endLog;
+        return -1;
+    }
+
     // Flash primary and secondary copies of the SPI U-Boot image
     BuildFlashCommand();
 
