@@ -10,45 +10,7 @@
 void SpiFlashImage::ParseSpiFlashConfig(const std::map<std::string, std::string> &config, std::string imageFile)
 {
     ASTRA_LOG;
-
-    SpiImageConfig spiConfig(m_chipName);
-
-    spiConfig.imageFile = imageFile;
-
-    // Allow spi command values from config override the default values
-    if (auto it = config.find("read_address"); it != config.end()) {
-        spiConfig.readAddress = it->second;
-    }
-
-    if (auto it = config.find("write_first_copy_address"); it != config.end()) {
-        spiConfig.writeFirstCopyAddress = it->second;
-    }
-
-    if (auto it = config.find("write_second_copy_address"); it != config.end()) {
-        spiConfig.writeSecondCopyAddress = it->second;
-    }
-
-    if (auto it = config.find("write_length"); it != config.end()) {
-        spiConfig.writeLength = it->second;
-    }
-
-    if (auto it = config.find("erase_first_start_address"); it != config.end()) {
-        spiConfig.eraseFirstStartAddress = it->second;
-    }
-
-    if (auto it = config.find("erase_first_length"); it != config.end()) {
-        spiConfig.eraseFirstLength = it->second;
-    }
-
-    if (auto it = config.find("erase_second_start_address"); it != config.end()) {
-        spiConfig.eraseSecondStartAddress = it->second;
-    }
-
-    if (auto it = config.find("erase_second_length"); it != config.end()) {
-        spiConfig.eraseSecondLength = it->second;
-    }
-
-    m_spiImageConfigs.push_back(spiConfig);
+    m_spiImageOverrides.push_back({imageFile, config});
 }
 
 int SpiFlashImage::Load()
@@ -97,15 +59,13 @@ int SpiFlashImage::Load()
             m_finalImage = imageFile;
 
             // If no manifest file was provided, then we will use the default SPI flash configuration.
-            SpiImageConfig spiConfig(m_chipName);
-            spiConfig.imageFile = imageFile;
-            m_spiImageConfigs.push_back(spiConfig);
+            m_spiImageOverrides.push_back({imageFile, {}});
         } else {
             return -1;
         }
     }
 
-    if (m_spiImageConfigs.empty()) {
+    if (m_spiImageOverrides.empty()) {
         log(ASTRA_LOG_LEVEL_ERROR) << "No SPI images configured - check that manifest has an image_file entry" << endLog;
         return -1;
     }
@@ -129,22 +89,42 @@ void SpiFlashImage::BuildFlashCommand()
 
     if (m_ubootVersion == ASTRA_UBOOT_VERSION_2019_10) {
         log(ASTRA_LOG_LEVEL_DEBUG) << "Using U-Boot 2019.10 SPI flash command sequence" << endLog;
-        for (const auto &imageConfig : m_spiImageConfigs) {
-            m_flashCommand += "usbload " + imageConfig.imageFile + " " + imageConfig.readAddress + "; spinit; erase "
-                + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength + "; cp.b "
-                + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress
-                + " " + imageConfig.writeLength + "; erase "
-                + imageConfig.eraseSecondStartAddress + " " + imageConfig.eraseSecondLength
-                + "; cp.b " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress
-                + " " + imageConfig.writeLength + "; ";
+        for (const auto &override : m_spiImageOverrides) {
+            SpiImageConfig cfg(m_chipName, m_ubootVersion);
+            cfg.imageFile = override.imageFile;
+            if (auto it = override.configOverrides.find("read_address"); it != override.configOverrides.end()) cfg.readAddress = it->second;
+            if (auto it = override.configOverrides.find("write_first_copy_address"); it != override.configOverrides.end()) cfg.writeFirstCopyAddress = it->second;
+            if (auto it = override.configOverrides.find("write_second_copy_address"); it != override.configOverrides.end()) cfg.writeSecondCopyAddress = it->second;
+            if (auto it = override.configOverrides.find("write_length"); it != override.configOverrides.end()) cfg.writeLength = it->second;
+            if (auto it = override.configOverrides.find("erase_first_start_address"); it != override.configOverrides.end()) cfg.eraseFirstStartAddress = it->second;
+            if (auto it = override.configOverrides.find("erase_first_length"); it != override.configOverrides.end()) cfg.eraseFirstLength = it->second;
+            if (auto it = override.configOverrides.find("erase_second_start_address"); it != override.configOverrides.end()) cfg.eraseSecondStartAddress = it->second;
+            if (auto it = override.configOverrides.find("erase_second_length"); it != override.configOverrides.end()) cfg.eraseSecondLength = it->second;
+            m_flashCommand += "usbload " + cfg.imageFile + " " + cfg.readAddress + "; spinit; erase "
+                + cfg.eraseFirstStartAddress + " " + cfg.eraseFirstLength + "; cp.b "
+                + cfg.readAddress + " " + cfg.writeFirstCopyAddress
+                + " " + cfg.writeLength + "; erase "
+                + cfg.eraseSecondStartAddress + " " + cfg.eraseSecondLength
+                + "; cp.b " + cfg.readAddress + " " + cfg.writeSecondCopyAddress
+                + " " + cfg.writeLength + "; ";
         }
         log(ASTRA_LOG_LEVEL_DEBUG) << "Flash command: " << m_flashCommand << endLog;
     } else {
         log(ASTRA_LOG_LEVEL_DEBUG) << "Using U-Boot 2025.01 SPI flash command sequence" << endLog;
-        for (const auto &imageConfig : m_spiImageConfigs) {
-             m_flashCommand += "usbload "  + imageConfig.imageFile + " " + imageConfig.readAddress + "; sf probe; sf erase " + imageConfig.eraseFirstStartAddress + " " + imageConfig.eraseFirstLength
-                + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeFirstCopyAddress + " " + imageConfig.writeLength + "; sf erase " + imageConfig.eraseSecondStartAddress
-                + " " + imageConfig.eraseSecondLength + "; sf write " + imageConfig.readAddress + " " + imageConfig.writeSecondCopyAddress + " " + imageConfig.writeLength + "; ";
+        for (const auto &override : m_spiImageOverrides) {
+            SpiImageConfig cfg(m_chipName, m_ubootVersion);
+            cfg.imageFile = override.imageFile;
+            if (auto it = override.configOverrides.find("read_address"); it != override.configOverrides.end()) cfg.readAddress = it->second;
+            if (auto it = override.configOverrides.find("write_first_copy_address"); it != override.configOverrides.end()) cfg.writeFirstCopyAddress = it->second;
+            if (auto it = override.configOverrides.find("write_second_copy_address"); it != override.configOverrides.end()) cfg.writeSecondCopyAddress = it->second;
+            if (auto it = override.configOverrides.find("write_length"); it != override.configOverrides.end()) cfg.writeLength = it->second;
+            if (auto it = override.configOverrides.find("erase_first_start_address"); it != override.configOverrides.end()) cfg.eraseFirstStartAddress = it->second;
+            if (auto it = override.configOverrides.find("erase_first_length"); it != override.configOverrides.end()) cfg.eraseFirstLength = it->second;
+            if (auto it = override.configOverrides.find("erase_second_start_address"); it != override.configOverrides.end()) cfg.eraseSecondStartAddress = it->second;
+            if (auto it = override.configOverrides.find("erase_second_length"); it != override.configOverrides.end()) cfg.eraseSecondLength = it->second;
+            m_flashCommand += "usbload " + cfg.imageFile + " " + cfg.readAddress + "; sf probe; sf erase " + cfg.eraseFirstStartAddress + " " + cfg.eraseFirstLength
+                + "; sf write " + cfg.readAddress + " " + cfg.writeFirstCopyAddress + " " + cfg.writeLength + "; sf erase " + cfg.eraseSecondStartAddress
+                + " " + cfg.eraseSecondLength + "; sf write " + cfg.readAddress + " " + cfg.writeSecondCopyAddress + " " + cfg.writeLength + "; ";
         }
         log(ASTRA_LOG_LEVEL_DEBUG) << "Flash command: " << m_flashCommand << endLog;
     }

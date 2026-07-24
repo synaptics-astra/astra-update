@@ -21,10 +21,10 @@ public:
 
 private:
     struct SpiImageConfig {
-        SpiImageConfig(const std::string chipName)
+        SpiImageConfig(const std::string& chipName, AstraUbootVersion ubootVersion)
         {
             if (chipName.compare(0, 5, "sl261") == 0) {
-                // Overwrite default config values for SL2610 series.
+                // SL261x defaults (U-Boot 2025.01)
                 readAddress = "0x10000000";
                 writeFirstCopyAddress = "0";
                 writeSecondCopyAddress = "0x200000";
@@ -33,19 +33,46 @@ private:
                 eraseFirstLength = "0x200000";
                 eraseSecondStartAddress = "0x200000";
                 eraseSecondLength = "0x200000";
+            } else if (ubootVersion == ASTRA_UBOOT_VERSION_2019_10) {
+                // SL16x0 + U-Boot 2019.10 defaults
+                readAddress = "0x10000000";
+                writeFirstCopyAddress = "0xf0000000";
+                writeSecondCopyAddress = "0xf0200000";
+                writeLength = "0x200000";
+                eraseFirstStartAddress = "0xf0000000";
+                eraseFirstLength = "0xf01fffff";
+                eraseSecondStartAddress = "0xf0200000";
+                eraseSecondLength = "0xf03fffff";
+            } else {
+                // SL16x0 + U-Boot 2025.01 defaults
+                readAddress = "0x10000000";
+                writeFirstCopyAddress = "0";
+                writeSecondCopyAddress = "0x200000";
+                writeLength = "0x200000";
+                eraseFirstStartAddress = "0";
+                eraseFirstLength = "0x200000";
+                eraseSecondStartAddress = "0x200000";
+                eraseSecondLength = "0x200000";
             }
         }
         std::string imageFile;
-        std::string readAddress = "0x10000000";
-        std::string writeFirstCopyAddress = "0xf0000000";
-        std::string writeSecondCopyAddress = "0xf0200000";
-        std::string writeLength = "0x200000";
-        std::string eraseFirstStartAddress = "0xf0000000";
-        std::string eraseFirstLength = "0xf01fffff";
-        std::string eraseSecondStartAddress = "0xf0200000";
-        std::string eraseSecondLength = "0xf03fffff";
+        std::string readAddress;
+        std::string writeFirstCopyAddress;
+        std::string writeSecondCopyAddress;
+        std::string writeLength;
+        std::string eraseFirstStartAddress;
+        std::string eraseFirstLength;
+        std::string eraseSecondStartAddress;
+        std::string eraseSecondLength;
     };
-    std::vector<SpiImageConfig> m_spiImageConfigs;
+
+    // Per-image file name and raw config overrides from the manifest,
+    // stored during Load() before the U-Boot version is known.
+    struct SpiImageOverride {
+        std::string imageFile;
+        std::map<std::string, std::string> configOverrides;
+    };
+    std::vector<SpiImageOverride> m_spiImageOverrides;
 
     void ParseSpiFlashConfig(const std::map<std::string, std::string> &config, std::string imageFile);
     void BuildFlashCommand();
