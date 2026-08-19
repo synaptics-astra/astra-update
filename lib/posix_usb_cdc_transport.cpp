@@ -114,8 +114,13 @@ bool PosixUSBCDCTransport::MatchesVendorProduct(const std::string& portPath) con
 
     const auto identity = ReadPosixIdentity(portPath);
     if (!identity.has_value() || !identity->vendorId.has_value() || !identity->productId.has_value()) {
-        // If platform metadata is unavailable, do not block detection.
-        return true;
+        // Without an identity we cannot tell an Astra device from any other
+        // serial port, and opening the wrong one means writing boot-protocol
+        // bytes at unrelated hardware.  Skip it, matching the Windows
+        // enumerator, which has always required a VID/PID match.
+        log(ASTRA_LOG_LEVEL_WARNING) << "Skipping " << portPath
+            << ": unable to read its USB vendor/product ID" << endLog;
+        return false;
     }
 
     const uint16_t vid = identity->vendorId.value();
