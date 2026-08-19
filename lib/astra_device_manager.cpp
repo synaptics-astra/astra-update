@@ -181,7 +181,11 @@ public:
             }
         }
 
-        m_transport->Shutdown();
+        // m_transport is only created in Init(); Shutdown() may be called
+        // before a successful Update()/Boot() (or after Init() threw).
+        if (m_transport) {
+            m_transport->Shutdown();
+        }
 
         if (m_fastbootTransport) {
             m_fastbootTransport->Shutdown();
