@@ -63,6 +63,7 @@ int LibUSBTransport::Init(std::vector<USBVendorProductId> vendorProductIds, cons
     int ret = libusb_init(&m_ctx);
     if (ret < 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to initialize libusb: " << libusb_error_name(ret) << endLog;
+        return ret;
     }
 
     if (m_usbDebug) {
