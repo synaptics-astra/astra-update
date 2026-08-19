@@ -3,112 +3,21 @@
 
 #include <iostream>
 #include <memory>
-#include <queue>
-#include <condition_variable>
-#include <functional>
+#include <string>
 #include <cxxopts.hpp>
-#include <indicators/progress_bar.hpp>
-#include <indicators/dynamic_progress.hpp>
-#include <unordered_map>
-#include <csignal>
-#include <chrono>
 
+#include "cli_common.hpp"
 #include "astra_device_manager.hpp"
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
 const std::string astraBootVersion = "2.0.3";
 
-// Define a struct to hold the two strings
-struct DeviceImageKey {
-    std::string deviceName;
-    std::string imageName;
-
-    bool operator==(const DeviceImageKey& other) const {
-        return deviceName == other.deviceName && imageName == other.imageName;
-    }
-};
-
-// Implement a custom hash function for the struct
-struct DeviceImageKeyHash {
-    std::size_t operator()(const DeviceImageKey& key) const {
-        return std::hash<std::string>()(key.deviceName) ^ std::hash<std::string>()(key.imageName);
-    }
-};
-
-std::queue<AstraDeviceManagerResponse> managerResponses;
-std::condition_variable managerResponsesCV;
-std::mutex managerResponsesMutex;
-std::atomic<bool> running{true};
-
-void AstraDeviceManagerResponseCallback(AstraDeviceManagerResponse response)
-{
-    std::lock_guard<std::mutex> lock(managerResponsesMutex);
-    managerResponses.push(response);
-    managerResponsesCV.notify_one();
-}
-
-
-void UpdateProgressBars(DeviceResponse &deviceResponse,
-    indicators::DynamicProgress<indicators::ProgressBar> &dynamicProgress,
-    std::unordered_map<DeviceImageKey, size_t, DeviceImageKeyHash> &progressBars)
-{
-    DeviceImageKey key{deviceResponse.m_deviceName, deviceResponse.m_imageName};
-
-    // Ensure a progress bar exists for this image
-    if (progressBars.find(key) == progressBars.end()) {
-        auto progress_bar = std::make_unique<indicators::ProgressBar>(
-            indicators::option::BarWidth{50},
-            indicators::option::Start{"["},
-            indicators::option::Fill{"="},
-            indicators::option::Lead{">"},
-            indicators::option::Remainder{" "},
-            indicators::option::End{"]"},
-            indicators::option::PostfixText{deviceResponse.m_imageName},
-            indicators::option::PrefixText{deviceResponse.m_deviceName + ": "},
-            indicators::option::ForegroundColor{indicators::Color::green},
-            indicators::option::ShowElapsedTime{true},
-            indicators::option::ShowRemainingTime{true},
-            indicators::option::MaxProgress{100}
-        );
-        size_t bardId = dynamicProgress.push_back(std::move(progress_bar));
-        progressBars[key] = bardId;
-    }
-
-    auto& progressBar = dynamicProgress[progressBars[key]];
-    progressBar.set_progress(deviceResponse.m_progress);
-
-    if (deviceResponse.m_progress == 100) {
-        progressBar.mark_as_completed();
-    }
-}
-
-void UpdateSimpleProgress(DeviceResponse &deviceResponse)
-{
-    std::cout << "Device: " << deviceResponse.m_deviceName
-                << " Image: " << deviceResponse.m_imageName
-                << " Progress: " << deviceResponse.m_progress << std::endl;
-}
-
-// Signal handlers may only touch lock-free atomics; notifying a condition
-// variable from here locks an internal mutex, which is undefined behaviour in
-// a signal handler and can deadlock if the signal lands on a thread already
-// holding it.  The response loop polls 'running' via wait_for() instead.
-static_assert(std::atomic<bool>::is_always_lock_free,
-    "SignalHandler stores to 'running' from a signal handler; it must be lock-free");
-
-void SignalHandler(int signal)
-{
-    if (signal == SIGINT) {
-        running.store(false);
-    }
-}
-
 int main(int argc, char* argv[])
 {
     cxxopts::Options options("AstraBoot", "Astra USB Boot Utility");
 
-    std::signal(SIGINT, SignalHandler);
+    astra_cli::InstallSignalHandler();
 
     options.add_options()
         ("l,log", "Log file path", cxxopts::value<std::string>()->default_value(""))
@@ -182,13 +91,13 @@ int main(int argc, char* argv[])
 
     // DynamicProgress to manage multiple progress bars
     indicators::DynamicProgress<indicators::ProgressBar> dynamicProgress;
-    std::unordered_map<DeviceImageKey, size_t, DeviceImageKeyHash> progressBars;
+    astra_cli::ProgressBars progressBars;
 
     dynamicProgress.set_option(indicators::option::HideBarWhenComplete{false});
 
     std::cout << "Astra Boot\n" << std::endl;
 
-    AstraDeviceManager deviceManager(AstraDeviceManagerResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);
+    AstraDeviceManager deviceManager(astra_cli::ResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);
 
     try {
         deviceManager.Boot(bootImagePath, bootCommand, bootStage);
@@ -199,65 +108,54 @@ int main(int argc, char* argv[])
 
     indicators::show_console_cursor(false);
 
-    if (running.load()) {
-        while (true) {
-            std::unique_lock<std::mutex> lock(managerResponsesMutex);
-            // Time-bounded so a SIGINT that only sets 'running' is noticed;
-            // the handler cannot safely notify the condition variable.
-            managerResponsesCV.wait_for(lock, std::chrono::milliseconds(100),
-                []{ return !managerResponses.empty() || !running.load(); });
+    while (astra_cli::g_running.load()) {
+        // WaitForResponse() pops the response and releases the queue lock
+        // before returning, so the rendering below cannot stall the device
+        // threads on terminal I/O.
+        auto response = astra_cli::WaitForResponse();
+        if (!response) {
+            continue; // timed out, or shutting down: the loop condition decides
+        }
 
-            if (!running.load()) {
+        if (response->IsDeviceManagerResponse()) {
+            const auto &managerResponse = response->GetDeviceManagerResponse();
+
+            if (managerResponse.m_managerStatus == ASTRA_DEVICE_MANAGER_STATUS_INFO) {
+                std::cout << managerResponse.m_managerMessage << "\n" << std::endl;
+            } else if (managerResponse.m_managerStatus == ASTRA_DEVICE_MANAGER_STATUS_SHUTDOWN) {
                 break;
+            } else if (managerResponse.m_managerStatus == ASTRA_DEVICE_MANAGER_STATUS_START) {
+                std::cout << managerResponse.m_managerMessage << "\n" << std::endl;
+            } else {
+                std::cout << "Device Manager status: " << managerResponse.m_managerStatus
+                          << " Message: " << managerResponse.m_managerMessage << std::endl;
             }
+        } else if (response->IsDeviceResponse()) {
+            const auto &deviceResponse = response->GetDeviceResponse();
 
-            if (managerResponses.empty()) {
-                continue; // woke on the timeout with nothing queued
-            }
-
-            auto status = managerResponses.front();
-            managerResponses.pop();
-
-            if (status.IsDeviceManagerResponse()) {
-                auto managerResponse = status.GetDeviceManagerResponse();
-                if (managerResponse.m_managerStatus == ASTRA_DEVICE_MANAGER_STATUS_INFO) {
-                    std::cout << managerResponse.m_managerMessage << "\n" << std::endl;
-                } else if (managerResponse.m_managerStatus == ASTRA_DEVICE_MANAGER_STATUS_SHUTDOWN) {
+            if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_ADDED) {
+                std::cout << "Detected Device: " << deviceResponse.m_deviceName << std::endl;
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_START) {
+                std::cout << "Booting Device: " << deviceResponse.m_deviceName << std::endl;
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+                std::cout << "Booting " << deviceResponse.m_deviceName << " is complete" << std::endl;
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
+                std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: "
+                          << deviceResponse.m_message << std::endl;
+                if (continuous && exitOnError) {
+                    astra_cli::g_running.store(false);
                     break;
-                } else if (managerResponse.m_managerStatus == ASTRA_DEVICE_MANAGER_STATUS_START) {
-                    std::cout << managerResponse.m_managerMessage << "\n" << std::endl;
-                } else {
-                    std::cout << "Device Manager status: " << managerResponse.m_managerStatus
-                            << " Message: " << managerResponse.m_managerMessage << std::endl;
                 }
-            } else if (status.IsDeviceResponse()) {
-                auto deviceResponse = status.GetDeviceResponse();
-
-                if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_ADDED) {
-                    std::cout << "Detected Device: " << deviceResponse.m_deviceName << std::endl;
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_START) {
-                    std::cout << "Booting Device: " << deviceResponse.m_deviceName << std::endl;
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
-                    std::cout << "Booting " << deviceResponse.m_deviceName << " is complete" << std::endl;
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
-                    std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: " << deviceResponse.m_message << std::endl;
-                    if (continuous && exitOnError) {
-                        running.store(false);
-                        break;
-                    }
-                } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_START ||
-                    deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS ||
-                    deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE)
-                {
-                    if (simpleProgress) {
-                        UpdateSimpleProgress(deviceResponse);
-                    } else {
-                        UpdateProgressBars(deviceResponse, dynamicProgress, progressBars);
-                    }
-                }
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_START ||
+                deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS ||
+                deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE)
+            {
+                astra_cli::ReportImageProgress(deviceResponse, simpleProgress,
+                    dynamicProgress, progressBars);
             }
         }
     }
+
     indicators::show_console_cursor(true);
 
     if (deviceManager.Shutdown()) {
