@@ -64,6 +64,10 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
             // then try the SYNAIMG directory. Which is the default directory name created by the
             // Yocto build system.
             imagePath = "SYNAIMG";
+            if (!std::filesystem::exists(imagePath)) {
+                throw std::invalid_argument("No update image found: neither eMMCimg nor SYNAIMG "
+                    "exists in the current directory. Use --flash to specify the image path.");
+            }
         } else {
             throw std::invalid_argument("" + imagePath + " not found");
         }

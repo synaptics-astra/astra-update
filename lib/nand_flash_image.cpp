@@ -44,7 +44,8 @@ int NandFlashImage::Load()
 
         std::string fullImagePath = m_imagePath + "/" + m_imageFile;
         if (!std::filesystem::exists(fullImagePath)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "NAND image file not found: " << fullImagePath << endLog;
+            m_loadError = "NAND image file not found: " + fullImagePath;
+            log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
             return -1;
         }
 
@@ -53,7 +54,8 @@ int NandFlashImage::Load()
     } else {
         m_imageFile = std::filesystem::path(m_imagePath).filename().string();
         if (!std::filesystem::exists(m_imagePath)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "NAND image path does not exist: " << m_imagePath << endLog;
+            m_loadError = "NAND image path does not exist: " + m_imagePath;
+            log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
             return -1;
         }
 

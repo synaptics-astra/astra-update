@@ -218,7 +218,11 @@ int main(int argc, char* argv[])
 
     int ret = flashImage->Load();
     if (ret < 0) {
-        std::cerr << "Failed to load flash image" << std::endl;
+        std::cerr << "Failed to load flash image";
+        if (!flashImage->GetLoadError().empty()) {
+            std::cerr << ": " << flashImage->GetLoadError();
+        }
+        std::cerr << std::endl;
         return -1;
     }
 

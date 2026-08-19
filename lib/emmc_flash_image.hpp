@@ -19,5 +19,5 @@ public:
     int Load() override;
 
 private:
-    void ParseEmmcImageList();
+    bool ParseEmmcImageList();
 };
