@@ -75,5 +75,10 @@ private:
     std::vector<SpiImageOverride> m_spiImageOverrides;
 
     void ParseSpiFlashConfig(const std::map<std::string, std::string> &config, std::string imageFile);
+
+    // Check every manifest value that reaches the U-Boot command line.
+    // Sets m_loadError and returns false on the first unsafe value.
+    bool ValidateOverrides();
+
     void BuildFlashCommand();
 };

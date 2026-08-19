@@ -85,6 +85,20 @@ int NandFlashImage::Load()
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND image file: " << m_imageFile << endLog;
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND read address: " << m_nandReadAddress << endLog;
 
+    // Both values land in the U-Boot command line below; a manifest that
+    // embeds ';' or whitespace could append arbitrary U-Boot commands.
+    if (!IsSafeUbootFilename(m_imageFile)) {
+        m_loadError = "Unsafe image_file in NAND manifest: '" + m_imageFile + "'";
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
+    }
+
+    if (!IsSafeUbootNumber(m_nandReadAddress)) {
+        m_loadError = "Unsafe read_address in NAND manifest: '" + m_nandReadAddress + "'";
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
+    }
+
     m_flashCommand = "usbload " + m_imageFile + " " + m_nandReadAddress
         + "; m2nand " + m_nandReadAddress;
 
