@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <thread>
 
 #include "libusb_device.hpp"
@@ -570,6 +571,16 @@ int LibUSBDevice::WriteInterruptData(const uint8_t *data, size_t size)
         return -1;
     }
 
+    if (m_interruptOutEndpoint == 0 || m_interruptOutSize == 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt OUT endpoint not available (bulk-only mode)" << endLog;
+        return -1;
+    }
+
+    if (size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt out data size too large: " << size << endLog;
+        return -1;
+    }
+
     log(ASTRA_LOG_LEVEL_DEBUG) << "Sending interrupt out transfer" << endLog;
     log(ASTRA_LOG_LEVEL_DEBUG) << "  Interrupt Out Endpoint: " << static_cast<int>(m_interruptOutEndpoint) << endLog;
     log(ASTRA_LOG_LEVEL_DEBUG) << "  Length: " << size << endLog;
@@ -579,15 +590,26 @@ int LibUSBDevice::WriteInterruptData(const uint8_t *data, size_t size)
     }
     log << std::dec << endLog;
 
-    std::memcpy(m_interruptOutBuffer, data, size);
-
-    libusb_fill_interrupt_transfer(m_outputInterruptXfer, m_handle, m_interruptOutEndpoint,
-        m_interruptOutBuffer, size, nullptr, nullptr, 0);
-
-    int ret = libusb_submit_transfer(m_outputInterruptXfer);
+    // Send synchronously from the caller's buffer.  The previous
+    // implementation memcpy'd into a wMaxPacketSize staging buffer with no
+    // bounds check, overflowing the heap for payloads larger than the
+    // endpoint max packet size (e.g. long console flash commands).  The
+    // synchronous API accepts arbitrary lengths (split into max-packet-size
+    // packets by the host controller) and needs no staging buffer or
+    // completion tracking.  Data is not modified; const_cast is required by
+    // the libusb OUT-transfer signature.
+    int transferred = 0;
+    int ret = libusb_interrupt_transfer(m_handle, m_interruptOutEndpoint,
+        const_cast<uint8_t *>(data), static_cast<int>(size), &transferred, 5000);
     if (ret < 0) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to submit output interrupt transfer: " << libusb_error_name(ret) << endLog;
-        return 1;
+        log(ASTRA_LOG_LEVEL_ERROR) << "Output interrupt transfer failed: " << libusb_error_name(ret) << endLog;
+        return -1;
+    }
+
+    if (static_cast<size_t>(transferred) != size) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Output interrupt transfer incomplete: " << transferred
+            << " of " << size << " bytes" << endLog;
+        return -1;
     }
 
     return 0;
