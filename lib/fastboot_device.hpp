@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -75,7 +76,7 @@ public:
     bool OemNoWait(const std::string &command);
 
     /** @return true if the underlying USB device has disconnected. */
-    bool IsDisconnected() const { return m_disconnected; }
+    bool IsDisconnected() const { return m_disconnected.load(); }
 
     /**
      * Probe the fastboot serial number of a freshly-arrived USB device
@@ -93,7 +94,8 @@ public:
 private:
     USBDevice *m_usbDevice = nullptr;
     bool m_opened = false;
-    bool m_disconnected = false;
+    // Set from the USB callback thread, read by the image-request loop.
+    std::atomic<bool> m_disconnected{false};
     std::function<void()> m_disconnectCallback;
 
     static constexpr size_t kCmdBufferSize = 64;
