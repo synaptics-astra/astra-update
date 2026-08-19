@@ -79,14 +79,13 @@ void WinLibUSBTransport::Shutdown()
             }
         }
 
-        if (m_hWnd) {
-            PostMessage(m_hWnd, WM_QUIT, 0, 0);
-            if (m_hotplugThread.joinable()) {
-                m_hotplugThread.join();
-            }
-            DestroyWindow(m_hWnd);
-            UnregisterClass(TEXT("AstraDeviceManager"), GetModuleHandle(nullptr));
-            m_hWnd = nullptr;
+        // The hotplug thread observes m_running (cleared above) and destroys
+        // the window, the device notification and the class registration on
+        // its way out.  That teardown must happen on the thread that created
+        // the window: DestroyWindow() fails from any other thread, so doing it
+        // here silently leaked the window and left the class registered.
+        if (m_hotplugThread.joinable()) {
+            m_hotplugThread.join();
         }
 
         // Interrupt the libusb event handler so DeviceMonitorThread returns
@@ -115,9 +114,12 @@ void WinLibUSBTransport::RunHotplugHandler()
     wc.lpszClassName = TEXT("AstraDeviceManager");
 
     if (!RegisterClass(&wc)) {
-        DWORD error = GetLastError();
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to register window class: " << error << endLog;
-        return;
+        const DWORD error = GetLastError();
+        // The class survives a previous transport instance in this process.
+        if (error != ERROR_CLASS_ALREADY_EXISTS) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to register window class: " << error << endLog;
+            return;
+        }
     }
 
     m_hWnd = CreateWindow(wc.lpszClassName, TEXT("AstraDeviceManager"), 0, 0, 0, 0, 0, nullptr, nullptr, wc.hInstance, this);
@@ -135,16 +137,39 @@ void WinLibUSBTransport::RunHotplugHandler()
 
     m_hDevNotify = RegisterDeviceNotification(m_hWnd, &dbi, DEVICE_NOTIFY_WINDOW_HANDLE);
     if (!m_hDevNotify) {
-        DWORD error = GetLastError();
-        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to register device notification: " << error << endLog;
-        return;
+        // Not fatal: fall through so the window is still torn down below.
+        // Returning here leaked the window and the class registration.
+        log(ASTRA_LOG_LEVEL_WARNING) << "Failed to register device notification: "
+            << GetLastError() << endLog;
     }
 
+    // Poll for messages rather than blocking in GetMessage().  Shutdown()
+    // signals the exit by clearing m_running: it cannot post to this window,
+    // because the window may not exist yet at the moment Shutdown() runs.
+    // (The previous loop also treated GetMessage()'s -1 error return as a
+    // message to dispatch, spinning forever on failure.)
     MSG msg;
-    while (GetMessage(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    while (m_running.load()) {
+        if (MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT) != WAIT_OBJECT_0) {
+            continue; // timed out or failed; re-check m_running
+        }
+
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
     }
+
+    // Tear down on the creating thread (see Shutdown()).
+    if (m_hDevNotify) {
+        UnregisterDeviceNotification(m_hDevNotify);
+        m_hDevNotify = nullptr;
+    }
+
+    DestroyWindow(m_hWnd);
+    m_hWnd = nullptr;
+
+    UnregisterClass(wc.lpszClassName, wc.hInstance);
 }
 
 LRESULT CALLBACK WinLibUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
