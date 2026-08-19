@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <cstdio>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <filesystem>
 
@@ -51,24 +53,18 @@ class Image
 {
 public:
     Image(std::string imagePath, AstraImageType imageType) : m_imagePath{imagePath}, m_imageSize{0},
-        m_imageType{imageType}, m_fp{nullptr}
+        m_imageType{imageType}
     {
         m_imageName = std::filesystem::path(m_imagePath).filename().string();
     }
-    Image(const Image &other) : m_imagePath{other.m_imagePath}, m_imageName{other.m_imageName},
-        m_imageSize{other.m_imageSize}, m_imageType{other.m_imageType}, m_fp{other.m_fp}
-    {}
-    ~Image();
 
-    Image &operator=(const Image &other)
-    {
-        m_imagePath = other.m_imagePath;
-        m_imageName = other.m_imageName;
-        m_imageSize = other.m_imageSize;
-        m_imageType = other.m_imageType;
-        m_fp = other.m_fp;
-        return *this;
-    }
+    // Copy, move and destruction are all correct by default.  The open file
+    // is owned by a shared_ptr with an fclose deleter, so copies share the
+    // handle and it is closed exactly once.  The hand-written copy operations
+    // this replaces copied the raw FILE* while the destructor closed it,
+    // which double-closed the handle and left the survivor dangling whenever
+    // a loaded Image was copied -- for example when the m_images vector
+    // reallocated as update images were appended.
 
     int Load();
 
@@ -79,12 +75,21 @@ public:
     AstraImageType GetImageType() const { return m_imageType; }
 
 private:
+    struct FileCloser {
+        void operator()(FILE *fp) const
+        {
+            if (fp != nullptr) {
+                std::fclose(fp);
+            }
+        }
+    };
+
     std::string m_imagePath;
     std::string m_imageName;
     size_t m_imageSize;
     AstraImageType m_imageType;
 
-    FILE *m_fp;
+    std::shared_ptr<FILE> m_fp;
 };
 
 static std::string AstraSecureBootVersionToString(AstraSecureBootVersion version)

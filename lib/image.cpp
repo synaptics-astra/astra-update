@@ -40,10 +40,6 @@ int Image::Load()
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "Image size: " << size << endLog;
 
-    if (m_fp) {
-        fclose(m_fp);
-    }
-
     FILE *fp = fopen(m_imagePath.c_str(), "rb");
     if (fp == nullptr) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open file: " << m_imagePath << endLog;
@@ -52,7 +48,9 @@ int Image::Load()
     }
 
     m_imageSize = static_cast<size_t>(size);
-    m_fp = fp;
+    // Assigning releases any previously held handle, closing it if this was
+    // the last reference.
+    m_fp = std::shared_ptr<FILE>(fp, FileCloser{});
 
     return 0;
 }
@@ -61,7 +59,8 @@ int Image::GetDataBlock(uint8_t *data, size_t size)
 {
     ASTRA_LOG;
 
-    if (m_fp == nullptr) {
+    FILE *fp = m_fp.get();
+    if (fp == nullptr) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Image not loaded: " << m_imagePath << endLog;
         return -1;
     }
@@ -69,7 +68,7 @@ int Image::GetDataBlock(uint8_t *data, size_t size)
     // Clamp with unsigned arithmetic.  The previous version mixed a signed
     // ftell result with the unsigned size in the comparison and truncated
     // size_t to int, which misbehaved on large images and on a failed ftell.
-    const long currentPos = ftell(m_fp);
+    const long currentPos = ftell(fp);
     if (currentPos < 0) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Failed to query position in " << m_imagePath << endLog;
         return -1;
@@ -82,7 +81,7 @@ int Image::GetDataBlock(uint8_t *data, size_t size)
 
     const size_t readSize = std::min(size, m_imageSize - position);
 
-    const size_t bytesRead = fread(data, 1, readSize, m_fp);
+    const size_t bytesRead = fread(data, 1, readSize, fp);
     if (bytesRead != readSize) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Short read from " << m_imagePath << ": expected "
             << readSize << " bytes, got " << bytesRead << endLog;
@@ -91,13 +90,4 @@ int Image::GetDataBlock(uint8_t *data, size_t size)
 
     // readSize is bounded by the caller's buffer size, so this fits in an int.
     return static_cast<int>(bytesRead);
-}
-
-Image::~Image()
-{
-    ASTRA_LOG;
-
-    if (m_fp) {
-        fclose(m_fp);
-    }
 }
