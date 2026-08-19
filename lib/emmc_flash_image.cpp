@@ -28,6 +28,17 @@ int EmmcFlashImage::Load()
     }
 
     std::string directoryName = std::filesystem::path(m_imagePath).filename().string();
+
+    // The directory name is passed to U-Boot's l2emmc as a single
+    // space-delimited token, so a name containing whitespace or ';' would
+    // produce a broken -- or injected -- command line.
+    if (!IsSafeUbootFilename(directoryName)) {
+        m_loadError = "Image directory name cannot be used in a U-Boot command: '"
+            + directoryName + "'";
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
+    }
+
     m_flashCommand = "l2emmc " + directoryName;
     if (m_resetWhenComplete) {
         m_flashCommand += m_resetCommand;

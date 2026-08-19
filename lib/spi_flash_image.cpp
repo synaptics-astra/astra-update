@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025 Synaptics Incorporated
 
+#include <array>
 #include <filesystem>
 #include <string>
 
@@ -77,10 +78,57 @@ int SpiFlashImage::Load()
         return -1;
     }
 
+    // Reject manifest values that would be unsafe or malformed once
+    // concatenated into the U-Boot flash command.
+    if (!ValidateOverrides()) {
+        return -1;
+    }
+
     // Flash primary and secondary copies of the SPI U-Boot image
     BuildFlashCommand();
 
     return ret;
+}
+
+bool SpiFlashImage::ValidateOverrides()
+{
+    ASTRA_LOG;
+
+    // Every manifest key whose value is substituted into the flash command.
+    static const std::array<const char *, 8> kAddressKeys = {
+        "read_address",
+        "write_first_copy_address",
+        "write_second_copy_address",
+        "write_length",
+        "erase_first_start_address",
+        "erase_first_length",
+        "erase_second_start_address",
+        "erase_second_length",
+    };
+
+    for (const auto &override : m_spiImageOverrides) {
+        if (!IsSafeUbootFilename(override.imageFile)) {
+            m_loadError = "Unsafe image_file in SPI manifest: '" + override.imageFile + "'";
+            log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+            return false;
+        }
+
+        for (const char *key : kAddressKeys) {
+            const auto it = override.configOverrides.find(key);
+            if (it == override.configOverrides.end()) {
+                continue;
+            }
+
+            if (!IsSafeUbootNumber(it->second)) {
+                m_loadError = std::string("Unsafe ") + key + " in SPI manifest for "
+                    + override.imageFile + ": '" + it->second + "'";
+                log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 void SpiFlashImage::OnUbootVersionChanged()
