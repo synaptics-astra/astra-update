@@ -260,9 +260,17 @@ void PosixUSBCDCTransport::ProcessUdevDevice(udev_device *dev)
         numInterfaces = isComposite ? uint8_t{2} : uint8_t{1};
     }
 
-    // If VID/PID are known, filter against the supported device list.
-    // If they are unavailable, pass through rather than blocking the device.
-    if (vendorId != 0 && !m_supportedDevices.empty()) {
+    // Filter against the supported device list.  A port whose VID/PID could
+    // not be read is skipped rather than passed through: we cannot tell an
+    // Astra device from any other ttyACM/ttyUSB, and opening the wrong one
+    // means writing boot-protocol bytes at unrelated hardware.
+    if (!m_supportedDevices.empty()) {
+        if (vendorId == 0 && productId == 0) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Skipping " << portPath
+                << ": unable to read its USB vendor/product ID" << endLog;
+            return;
+        }
+
         bool matches = false;
         for (const auto &[v, p] : m_supportedDevices) {
             if (vendorId == v && productId == p) { matches = true; break; }
