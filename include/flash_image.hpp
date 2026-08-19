@@ -32,6 +32,11 @@ public:
 
     virtual int Load() = 0;
 
+    // Reason for the most recent Load() failure, for callers to report.
+    // Load() runs before the device manager opens the log store, so log
+    // messages emitted from it are otherwise lost.
+    const std::string &GetLoadError() const { return m_loadError; }
+
     std::string GetBootImageId() const { return m_bootImageId; }
     std::string GetChipName() const { return m_chipName; }
     std::string GetBoardName() const { return m_boardName; }
@@ -62,6 +67,7 @@ protected:
     std::vector<Image> m_images;
     std::string m_flashCommand;
     std::string m_finalImage;
+    std::string m_loadError;
     std::unique_ptr<std::vector<std::map<std::string, std::string>>> m_manifestMaps;
     bool m_resetWhenComplete = true;
     const std::string m_resetCommand = "; sleep 1; reset"; // sleep before resetting to let console messages be sent to the host

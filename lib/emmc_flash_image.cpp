@@ -21,24 +21,33 @@ int EmmcFlashImage::Load()
         m_imagePath.erase(m_imagePath.size() - 1);
     }
 
-    if (std::filesystem::exists(m_imagePath) && std::filesystem::is_directory(m_imagePath)) {
-        std::string directoryName = std::filesystem::path(m_imagePath).filename().string();
-        m_flashCommand = "l2emmc " + directoryName;
-        if (m_resetWhenComplete) {
-            m_flashCommand += m_resetCommand;
-        }
-        for (const auto& entry : std::filesystem::directory_iterator(m_imagePath)) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Found file: " << entry.path() << endLog;
-            std::string filename = entry.path().filename().string();
-            if ((filename.find("emmc") != std::string::npos) ||
-                (filename.find("subimg") != std::string::npos))
-            {
-                m_images.push_back(std::move(Image(entry.path().string(), ASTRA_IMAGE_TYPE_UPDATE_EMMC)));
-            }
-            // TAG-- files are handled separately by DetectChipFromTagFile() below.
-        }
+    if (!std::filesystem::exists(m_imagePath) || !std::filesystem::is_directory(m_imagePath)) {
+        m_loadError = "eMMC image directory not found: " + m_imagePath;
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
     }
 
+    std::string directoryName = std::filesystem::path(m_imagePath).filename().string();
+    m_flashCommand = "l2emmc " + directoryName;
+    if (m_resetWhenComplete) {
+        m_flashCommand += m_resetCommand;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(m_imagePath)) {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Found file: " << entry.path() << endLog;
+        std::string filename = entry.path().filename().string();
+        if ((filename.find("emmc") != std::string::npos) ||
+            (filename.find("subimg") != std::string::npos))
+        {
+            m_images.push_back(std::move(Image(entry.path().string(), ASTRA_IMAGE_TYPE_UPDATE_EMMC)));
+        }
+        // TAG-- files are handled separately by DetectChipFromTagFile() below.
+    }
+
+    if (m_images.empty()) {
+        m_loadError = "No eMMC images found in " + m_imagePath;
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
+    }
 
     // Detect chip info from TAG file if chip name not already set
     if (m_chipName.empty()) {
@@ -54,12 +63,14 @@ int EmmcFlashImage::Load()
             log(ASTRA_LOG_LEVEL_WARNING) << "Failed to detect chip from TAG file: " << e.what() << endLog;
         }
     }
-    ParseEmmcImageList();
+    if (!ParseEmmcImageList()) {
+        return -1;
+    }
 
     return ret;
 }
 
-void EmmcFlashImage::ParseEmmcImageList()
+bool EmmcFlashImage::ParseEmmcImageList()
 {
     ASTRA_LOG;
 
@@ -71,7 +82,19 @@ void EmmcFlashImage::ParseEmmcImageList()
         }
     }
 
+    if (emmcPartImagePath.empty()) {
+        m_loadError = "emmc_image_list not found in " + m_imagePath;
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return false;
+    }
+
     std::ifstream file(emmcPartImagePath);
+    if (!file) {
+        m_loadError = "Failed to open " + emmcPartImagePath;
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return false;
+    }
+
     std::string line;
     std::string lastEntryName;
 
@@ -89,6 +112,15 @@ void EmmcFlashImage::ParseEmmcImageList()
         }
     }
 
+    if (lastEntryName.empty()) {
+        // Without a final image the update never reaches UPDATE_COMPLETE and
+        // the run ends on a disconnect or timeout, reported as a failure.
+        m_loadError = "No flashable entries in " + emmcPartImagePath;
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return false;
+    }
+
     m_finalImage = lastEntryName;
     log(ASTRA_LOG_LEVEL_DEBUG) << "Final image: " << m_finalImage << endLog;
+    return true;
 }

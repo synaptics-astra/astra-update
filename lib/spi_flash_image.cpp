@@ -34,6 +34,8 @@ int SpiFlashImage::Load()
                         m_finalImage = imageFile;
                         ParseSpiFlashConfig(map, imageFile);
                     } else {
+                        m_loadError = "SPI image file not found: " + fullImagePath;
+                        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
                         return -1;
                     }
                 }
@@ -47,6 +49,8 @@ int SpiFlashImage::Load()
                         m_finalImage = imageFile;
                         ParseSpiFlashConfig(map, imageFile);
                     } else {
+                        m_loadError = "SPI image file not found: " + fullImagePath;
+                        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
                         return -1;
                     }
                 }
@@ -61,12 +65,15 @@ int SpiFlashImage::Load()
             // If no manifest file was provided, then we will use the default SPI flash configuration.
             m_spiImageOverrides.push_back({imageFile, {}});
         } else {
+            m_loadError = "SPI image path does not exist: " + m_imagePath;
+            log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
             return -1;
         }
     }
 
     if (m_spiImageOverrides.empty()) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "No SPI images configured - check that manifest has an image_file entry" << endLog;
+        m_loadError = "No SPI images configured - check that the manifest has an image_file entry";
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
         return -1;
     }
 
