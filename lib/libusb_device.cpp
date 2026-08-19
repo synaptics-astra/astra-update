@@ -639,6 +639,62 @@ uint8_t LibUSBDevice::GetNumInterfaces() const
     return m_config->bNumInterfaces;
 }
 
+void LibUSBDevice::SignalWriteFailure(struct libusb_transfer *transfer)
+{
+    if (transfer->type != LIBUSB_TRANSFER_TYPE_BULK || transfer->endpoint != m_bulkOutEndpoint) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_writeCompleteMutex);
+        m_writeError.store(true);
+        m_writeComplete.store(true);
+    }
+    m_writeCompleteCV.notify_one();
+}
+
+void LibUSBDevice::ClearHaltAndResubmit(struct libusb_transfer *transfer)
+{
+    ASTRA_LOG;
+
+    int ret = libusb_clear_halt(m_handle, transfer->endpoint);
+    if (ret < 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint 0x" << std::hex
+            << static_cast<int>(transfer->endpoint) << std::dec << ": "
+            << libusb_error_name(ret) << endLog;
+
+        if (ret == LIBUSB_ERROR_NO_DEVICE) {
+            m_running.store(false);
+            if (m_usbEventCallback) {
+                m_usbEventCallback(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
+            }
+        } else if (m_usbEventCallback) {
+            m_usbEventCallback(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
+        }
+
+        SignalWriteFailure(transfer);
+        return;
+    }
+
+    log(ASTRA_LOG_LEVEL_INFO) << "Halt cleared, resubmitting transfer" << endLog;
+
+    if (!m_running.load()) {
+        log(ASTRA_LOG_LEVEL_DEBUG) << "Not resubmitting after clear halt: device is shutting down" << endLog;
+        SignalWriteFailure(transfer);
+        return;
+    }
+
+    ret = libusb_submit_transfer(transfer);
+    if (ret < 0) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "Failed to resubmit transfer after clearing halt: "
+            << libusb_error_name(ret) << endLog;
+        SignalWriteFailure(transfer);
+        if (m_usbEventCallback) {
+            m_usbEventCallback(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
+        }
+    }
+}
+
 void LibUSBDevice::HandleTransfer(struct libusb_transfer *transfer)
 {
     ASTRA_LOG;
@@ -697,15 +753,7 @@ void LibUSBDevice::HandleTransfer(struct libusb_transfer *transfer)
         device->m_cancellationCV.notify_one();
 
         // Unblock any Write() waiting on this bulk OUT transfer
-        if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
-                transfer->endpoint == device->m_bulkOutEndpoint) {
-            {
-                std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
-                device->m_writeError.store(true);
-                device->m_writeComplete.store(true);
-            }
-            device->m_writeCompleteCV.notify_one();
-        }
+        device->SignalWriteFailure(transfer);
 
         queueEvent(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
@@ -730,54 +778,24 @@ void LibUSBDevice::HandleTransfer(struct libusb_transfer *transfer)
         device->m_cancellationCV.notify_one();
 
         // Unblock any Write() waiting on this bulk OUT transfer
-        if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
-                transfer->endpoint == device->m_bulkOutEndpoint) {
-            {
-                std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
-                device->m_writeError.store(true);
-                device->m_writeComplete.store(true);
-            }
-            device->m_writeCompleteCV.notify_one();
-        }
+        device->SignalWriteFailure(transfer);
 
         queueEvent(USB_DEVICE_EVENT_TRANSFER_CANCELED, nullptr, 0);
     } else if (transfer->status == LIBUSB_TRANSFER_STALL) {
-        log(ASTRA_LOG_LEVEL_WARNING) << "Endpoint stalled, clearing halt" << endLog;
-        int ret = libusb_clear_halt(device->m_handle, transfer->endpoint);
-        if (ret < 0) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint: " << libusb_error_name(ret) << endLog;
-            if (ret == LIBUSB_ERROR_NO_DEVICE) {
-                device->m_running.store(false);
-                queueEvent(USB_DEVICE_EVENT_NO_DEVICE, nullptr, 0);
-            } else {
-                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to clear halt on endpoint: " << libusb_error_name(ret) << endLog;
-            }
-            // Unblock any Write() waiting on this bulk OUT transfer
-            if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
-                    transfer->endpoint == device->m_bulkOutEndpoint) {
-                {
-                    std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
-                    device->m_writeError.store(true);
-                    device->m_writeComplete.store(true);
-                }
-                device->m_writeCompleteCV.notify_one();
-            }
-        } else {
-            log(ASTRA_LOG_LEVEL_INFO) << "Halt cleared, retrying transfer" << endLog;
-            resubmit = true;
-        }
+        log(ASTRA_LOG_LEVEL_WARNING) << "Endpoint stalled, scheduling clear halt" << endLog;
+
+        // Do NOT clear the halt here.  libusb_clear_halt() is a synchronous
+        // control transfer, and this callback runs on the event-handling
+        // thread: the synchronous call would wait for events that only this
+        // thread can deliver, deadlocking it.  Hand the clear-and-resubmit to
+        // the callback worker thread instead, which Close() joins before it
+        // cancels or frees any transfer, so the transfer stays valid.
+        device->QueueCallbackAction([device, transfer]() {
+            device->ClearHaltAndResubmit(transfer);
+        });
     } else {
         log(ASTRA_LOG_LEVEL_ERROR) << "Transfer failed: " << libusb_error_name(transfer->status) << endLog;
-        // Unblock any Write() waiting on this bulk OUT transfer
-        if (transfer->type == LIBUSB_TRANSFER_TYPE_BULK &&
-                transfer->endpoint == device->m_bulkOutEndpoint) {
-            {
-                std::lock_guard<std::mutex> wlock(device->m_writeCompleteMutex);
-                device->m_writeError.store(true);
-                device->m_writeComplete.store(true);
-            }
-            device->m_writeCompleteCV.notify_one();
-        }
+        device->SignalWriteFailure(transfer);
         queueEvent(USB_DEVICE_EVENT_TRANSFER_ERROR, nullptr, 0);
     }
 

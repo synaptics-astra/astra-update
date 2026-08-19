@@ -66,8 +66,12 @@ protected:
 
     // Async callback processing
     struct CallbackEvent {
-        USBEvent event;
+        USBEvent event{USB_DEVICE_EVENT_TRANSFER_ERROR};
         std::vector<uint8_t> data;
+        // When set, the worker runs this instead of dispatching to the event
+        // callback.  Used to move work off the USB event thread, which must
+        // not block (see QueueCallbackAction).
+        std::function<void()> action;
     };
     std::queue<CallbackEvent> m_callbackQueue;
     std::mutex m_callbackQueueMutex;
@@ -81,6 +85,16 @@ protected:
     std::atomic<bool> m_bulkWriteCancelled{false};
     std::mutex m_cancellationMutex;
     std::condition_variable m_cancellationCV;
+
+    // Queue work to run on the callback worker thread.  Use for anything that
+    // must not run on the USB event-handling thread -- in particular libusb's
+    // synchronous calls, which wait for events that only that thread delivers
+    // and would therefore deadlock it.
+    //
+    // Derived Close() implementations join the worker thread before releasing
+    // the resources an action may touch, so a queued action never outlives
+    // them.
+    void QueueCallbackAction(std::function<void()> action);
 
     void CallbackWorkerThread();
 };

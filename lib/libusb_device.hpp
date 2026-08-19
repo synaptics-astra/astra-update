@@ -71,4 +71,13 @@ protected:
     int m_bulkTransferTimeout;
 
     static void LIBUSB_CALL HandleTransfer(struct libusb_transfer *transfer);
+
+    // Unblock a Write() waiting on the bulk OUT transfer, reporting an error.
+    // No-op for any other transfer.
+    void SignalWriteFailure(struct libusb_transfer *transfer);
+
+    // Clear a stalled endpoint and resubmit the transfer.  Runs on the
+    // callback worker thread: libusb_clear_halt() is a synchronous control
+    // transfer and must not be issued from a transfer callback.
+    void ClearHaltAndResubmit(struct libusb_transfer *transfer);
 };
