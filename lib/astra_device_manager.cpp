@@ -8,6 +8,7 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <condition_variable>
@@ -154,33 +155,74 @@ public:
         Init();
     }
 
+    ~AstraDeviceManagerImpl()
+    {
+        // Ensure device threads are joined even if the application never
+        // called Shutdown(); m_deviceThreads holds joinable std::threads and
+        // destroying one would call std::terminate.
+        Shutdown();
+    }
+
     bool Shutdown()
     {
         ASTRA_LOG;
 
-        // Snapshot and clear under the lock, then Close() outside it.
-        // Close() → UnregisterFastbootSerial() also acquires m_devicesMutex;
-        // calling Close() while holding the lock would re-enter a non-recursive
-        // mutex and throw std::system_error in the MSVC debug CRT.
+        if (m_shutdownComplete.exchange(true)) {
+            return m_failureReported.load();
+        }
+
+        // Stop DeviceAddedCallback from spawning any further device threads
+        // before we start tearing down the state those threads use.
+        m_shuttingDown.store(true);
+
+        // Snapshot and clear under the lock, then act outside it.
+        // Close() → UnregisterFastbootSerial() and the device threads
+        // themselves also acquire m_devicesMutex; holding the lock across
+        // Close() or join() would deadlock (and re-entering a non-recursive
+        // mutex throws std::system_error in the MSVC debug CRT).
         std::vector<std::shared_ptr<AstraDevice>> devicesToClose;
+        std::vector<std::thread> threadsToJoin;
         {
             std::lock_guard<std::mutex> lock(m_devicesMutex);
-            devicesToClose = std::move(m_devices);
-            m_devices.clear();
+            for (auto& entry : m_deviceThreads) {
+                devicesToClose.push_back(std::move(entry.device));
+                threadsToJoin.push_back(std::move(entry.thread));
+            }
+            m_deviceThreads.clear();
         }
+
+        // Close before joining: this is what unblocks the device threads
+        // (image-request loops, console waits, pending USB transfers) so the
+        // joins below can complete.  The transports are shut down only after
+        // the joins, because the libusb event thread is what delivers the
+        // transfer-cancellation callbacks LibUSBDevice::Close() waits for.
         for (auto& device : devicesToClose) {
             device->Close();
         }
-        AstraLogStore::getInstance().Close();
 
-        if (m_removeTempOnClose) {
-            try {
-                std::filesystem::remove_all(m_tempDir);
-            } catch (const std::exception& e) {
-                log(ASTRA_LOG_LEVEL_WARNING) << "Failed to remove temp directory: " << e.what() << endLog;
+        for (auto& thread : threadsToJoin) {
+            if (!thread.joinable()) {
+                continue;
             }
+
+            if (thread.get_id() == std::this_thread::get_id()) {
+                // Shutdown() was reached from a device thread, i.e. the
+                // application destroyed the manager from inside the response
+                // callback.  A thread cannot join itself, so detach and let it
+                // unwind.  That thread still touches this object after the
+                // callback returns, so destroying the manager from the callback
+                // remains unsafe; it is supported only to the extent that it
+                // does not abort here.
+                log(ASTRA_LOG_LEVEL_WARNING) << "Shutdown() called from a device thread; "
+                    "detaching it instead of joining" << endLog;
+                thread.detach();
+                continue;
+            }
+
+            thread.join();
         }
 
+        // No device thread can reach the transports any more.
         // m_transport is only created in Init(); Shutdown() may be called
         // before a successful Update()/Boot() (or after Init() threw).
         if (m_transport) {
@@ -192,7 +234,17 @@ public:
             m_fastbootTransport.reset();
         }
 
-        return m_failureReported;
+        AstraLogStore::getInstance().Close();
+
+        if (m_removeTempOnClose.load()) {
+            try {
+                std::filesystem::remove_all(m_tempDir);
+            } catch (const std::exception& e) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "Failed to remove temp directory: " << e.what() << endLog;
+            }
+        }
+
+        return m_failureReported.load();
     }
 
 
@@ -210,24 +262,78 @@ private:
     std::string m_bootCommand;
     std::string m_tempDir;
     AstraDeviceManangerMode m_managerMode;
-    bool m_removeTempOnClose = false;
+    // Written from device threads via ResponseCallback, read by Shutdown().
+    std::atomic<bool> m_removeTempOnClose{false};
     bool m_runContinuously = false;
     bool m_deviceFound = false;
     bool m_usbDebug = false;
     AstraTransportType m_transportType = ASTRA_TRANSPORT_USB;
     AstraDeviceSeries m_deviceSeries = ASTRA_SERIES_SL16XX;
     AstraDeviceBootStage m_bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
-    bool m_failureReported = false;
+    std::atomic<bool> m_failureReported{false};
     std::string m_modifiedLogPath;
     std::string m_filterPorts;
     std::atomic<bool> m_completed{false};
+    // Set at the start of Shutdown() so no further device threads are spawned.
+    std::atomic<bool> m_shuttingDown{false};
+    std::atomic<bool> m_shutdownComplete{false};
 
     // VID:PID of the fastboot USB device (set in Init(), used in DeviceAddedCallback).
     uint16_t m_fastbootVid = 0;
     uint16_t m_fastbootPid = 0;
 
-    std::vector<std::shared_ptr<AstraDevice>> m_devices;
+    // A device and the thread driving it, owned together so both are torn
+    // down as a unit.  The thread was previously detached, which left it
+    // running against a destroyed manager when the application shut down
+    // mid-operation (e.g. Ctrl-C).  Guarded by m_devicesMutex.
+    struct DeviceThread {
+        std::shared_ptr<AstraDevice> device;
+        std::thread thread;
+        // Set by the thread itself once AstraDeviceThread has returned and it
+        // no longer touches the manager, so finished entries can be reaped
+        // without blocking.  Held by shared_ptr so it outlives the manager if
+        // the application destroys it from inside the response callback.
+        std::shared_ptr<std::atomic<bool>> finished;
+    };
+    std::vector<DeviceThread> m_deviceThreads;
     std::mutex m_devicesMutex;
+
+    // Join and drop device threads that have already run to completion.
+    // Called on each new arrival so a continuous-mode run does not accumulate
+    // one finished thread per device.
+    void ReapFinishedDeviceThreads()
+    {
+        ASTRA_LOG;
+
+        // Move both the threads and the devices out under the lock so that
+        // neither the join nor the AstraDevice destructor runs while it is
+        // held: ~AstraDeviceImpl calls Close(), which can reach
+        // UnregisterFastbootSerial() and re-lock this same non-recursive mutex.
+        std::vector<std::thread> finishedThreads;
+        std::vector<std::shared_ptr<AstraDevice>> finishedDevices;
+        {
+            std::lock_guard<std::mutex> lock(m_devicesMutex);
+            for (auto it = m_deviceThreads.begin(); it != m_deviceThreads.end(); ) {
+                if (it->finished->load()) {
+                    finishedThreads.push_back(std::move(it->thread));
+                    finishedDevices.push_back(std::move(it->device));
+                    it = m_deviceThreads.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
+        // These threads have finished their work but may still be unwinding,
+        // and a device thread can take m_devicesMutex.
+        for (auto& thread : finishedThreads) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+
+        // finishedDevices is destroyed here, outside the lock.
+    }
 
     // Registry mapping fastboot UUID serials → waiting AstraDevice impls.
     // Guarded by m_devicesMutex.  Values are weak_ptr to avoid extending lifetime.
@@ -527,10 +633,18 @@ private:
     {
         ASTRA_LOG;
 
+        if (m_shuttingDown.load()) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Shutting down, ignoring device arrival" << endLog;
+            return;
+        }
+
         if (!m_runContinuously && m_completed.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Boot/update already completed, ignoring spurious device arrival" << endLog;
             return;
         }
+
+        // Reclaim threads from devices that have already finished.
+        ReapFinishedDeviceThreads();
 
         log(ASTRA_LOG_LEVEL_DEBUG) << "Device added AstraDeviceManagerImpl::DeviceAddedCallback" << endLog;
 
@@ -586,11 +700,31 @@ private:
                 UnregisterFastbootSerial(uuid);
             });
 
+        auto finished = std::make_shared<std::atomic<bool>>(false);
+
         {
             std::lock_guard<std::mutex> lock(m_devicesMutex);
+
+            // Re-check under the lock: Shutdown() snapshots m_deviceThreads
+            // while holding it, so a thread spawned after that snapshot would
+            // never be joined.
+            if (m_shuttingDown.load()) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Shutting down, not starting device thread" << endLog;
+                return;
+            }
+
             m_deviceFound = true;
-            m_devices.push_back(astraDevice);
-            std::thread(std::bind(&AstraDeviceManagerImpl::AstraDeviceThread, this, astraDevice)).detach();
+
+            // The thread is created and registered under the same lock so it
+            // is always visible to Shutdown().  It sets 'finished' only after
+            // AstraDeviceThread returns, i.e. once it no longer touches this
+            // object.
+            std::thread worker([this, astraDevice, finished]() {
+                AstraDeviceThread(astraDevice);
+                finished->store(true);
+            });
+
+            m_deviceThreads.push_back(DeviceThread{astraDevice, std::move(worker), finished});
         }
     }
 
