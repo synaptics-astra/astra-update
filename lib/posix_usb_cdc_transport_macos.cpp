@@ -32,18 +32,30 @@ struct PosixUSBCDCTransport::Impl {
     std::condition_variable m_ioKitCV;
     bool m_ioKitReady{false};
 
-    ~Impl()
+    // Stop the IOKit run loop and join the monitor thread.  Idempotent: once
+    // the thread has been joined it is no longer joinable and this is a no-op.
+    void Stop()
     {
         {
             std::unique_lock<std::mutex> lk(m_ioKitMutex);
-            m_ioKitCV.wait(lk, [this] { return m_ioKitReady || !m_ioKitThread.joinable(); });
+            if (!m_ioKitThread.joinable()) {
+                return;
+            }
+            // Wait for the thread to publish its run loop before stopping it,
+            // otherwise a stop issued too early is missed and CFRunLoopRun()
+            // blocks forever.
+            m_ioKitCV.wait(lk, [this] { return m_ioKitReady; });
             if (m_runLoop) {
                 CFRunLoopStop(m_runLoop);
             }
         }
-        if (m_ioKitThread.joinable()) {
-            m_ioKitThread.join();
-        }
+        m_ioKitThread.join();
+    }
+
+    ~Impl()
+    {
+        // Safety net: Shutdown() normally stops the monitor first.
+        Stop();
     }
 };
 
@@ -246,6 +258,16 @@ void PosixUSBCDCTransport::StartDeviceMonitor()
 {
     ASTRA_LOG;
     m_impl->m_ioKitThread = std::thread(&PosixUSBCDCTransport::IOKitMonitorThread, this);
+}
+
+// ---------------------------------------------------------------------------
+// StopPlatformMonitor — called from USBCDCTransport::Shutdown()
+// ---------------------------------------------------------------------------
+
+void PosixUSBCDCTransport::StopPlatformMonitor()
+{
+    ASTRA_LOG;
+    m_impl->Stop();
 }
 
 // ---------------------------------------------------------------------------

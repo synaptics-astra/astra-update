@@ -39,6 +39,13 @@ protected:
     bool IsValidPort(const std::string& portPath) const;
     virtual std::string NormalizePortPath(const std::string& portPath) const;
 
+    // Stop and join any platform-specific monitor thread started by
+    // StartDeviceMonitor() (udev on Linux, IOKit on macOS).  Called from
+    // Shutdown() so the monitor cannot deliver a device arrival after the
+    // transport has been shut down.  Must be idempotent: the platform
+    // destructor calls it again as a safety net.
+    virtual void StopPlatformMonitor() {}
+
     std::set<std::string> m_activeDevices;
     std::mutex m_activeDevicesMutex;
 
