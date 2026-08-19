@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -259,28 +260,26 @@ private:
     {
         ASTRA_LOG;
 
-        bool notified = false;
-        {
-            std::unique_lock<std::mutex> lock(m_imageRequestMutex);
-            log(ASTRA_LOG_LEVEL_DEBUG) << "WaitForImageRequest: waiting" << endLog;
+        std::unique_lock<std::mutex> lock(m_imageRequestMutex);
+        log(ASTRA_LOG_LEVEL_DEBUG) << "WaitForImageRequest: waiting" << endLog;
 
-            notified = m_imageRequestCV.wait_for(lock, timeout, [this] {
-                bool prev = m_imageRequestReady.load();
-                if (prev) {
-                    m_imageRequestReady.store(false);
-                }
-                return prev || !m_running.load();
-            });
-        }
+        const bool notified = m_imageRequestCV.wait_for(lock, timeout, [this] {
+            return m_imageRequestReady.load() || !m_running.load();
+        });
 
         if (!m_running.load()) {
             return false; // shutdown
         }
 
-        if (!notified) {
+        if (!notified || !m_imageRequestReady.load()) {
             return false; // timeout
         }
 
+        m_imageRequestReady.store(false);
+
+        // Copy while still holding the lock.  HandleInterrupt publishes both
+        // fields under the same lock, so a second interrupt cannot rewrite
+        // them while the image-request loop is reading them.
         name      = m_requestedImageName;
         imageType = m_imageType;
         return true;
@@ -301,22 +300,39 @@ private:
             }
 
             it += m_imageRequestString.size();
-            m_imageType = buf[it];
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Image type: " << std::hex << m_imageType << std::dec << endLog;
 
+            // The magic string is followed by a one-byte image type and then
+            // the image name.  This data comes from the device, so a
+            // truncated packet must not be trusted: reading buf[it] would run
+            // past the buffer and substr(it + 1) would throw std::out_of_range
+            // out of the USB callback thread, terminating the process.
+            if (it >= size) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "Ignoring truncated image request packet of "
+                    << size << " bytes" << endLog;
+                return;
+            }
+
+            const uint8_t imageType = buf[it];
             std::string imageName = message.substr(it + 1);
 
             // Strip off trailing NUL bytes.
             size_t end = imageName.find_last_not_of('\0');
             if (end != std::string::npos) {
-                m_requestedImageName = imageName.substr(0, end + 1);
-            } else {
-                m_requestedImageName = imageName;
+                imageName = imageName.substr(0, end + 1);
             }
 
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Requested image name: '" << m_requestedImageName << "'" << endLog;
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Image type: " << std::hex
+                << static_cast<int>(imageType) << std::dec << endLog;
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Requested image name: '" << imageName << "'" << endLog;
 
-            m_imageRequestReady.store(true);
+            // Publish under the lock so WaitForImageRequest cannot observe a
+            // half-updated name/type pair.
+            {
+                std::lock_guard<std::mutex> lock(m_imageRequestMutex);
+                m_imageType = imageType;
+                m_requestedImageName = std::move(imageName);
+                m_imageRequestReady.store(true);
+            }
             m_imageRequestCV.notify_one();
         } else if (m_console != nullptr) {
             m_console->Append(message);
@@ -333,8 +349,14 @@ private:
             event == USBDevice::USB_DEVICE_EVENT_TRANSFER_CANCELED ||
             event == USBDevice::USB_DEVICE_EVENT_TRANSFER_ERROR)
         {
+            std::string lastRequestedImage;
+            {
+                std::lock_guard<std::mutex> lock(m_imageRequestMutex);
+                lastRequestedImage = m_requestedImageName;
+            }
+
             // When using SU-Boot, gen3_miniloader.bin.usb causes reset/reconnect.
-            if (m_requestedImageName == "gen3_miniloader.bin.usb") {
+            if (lastRequestedImage == "gen3_miniloader.bin.usb") {
                 log(ASTRA_LOG_LEVEL_INFO) << "Device disconnected: after sending gen3_miniloader.bin.usb" << endLog;
             } else {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Device disconnected: shutting down" << endLog;
@@ -396,7 +418,7 @@ private:
     {
         ASTRA_LOG;
 
-        int totalTransferred = 0;
+        size_t totalTransferred = 0;
         int transferred = 0;
 
         int ret = image.Load();
@@ -405,19 +427,30 @@ private:
             return ret;
         }
 
-        const int imageHeaderSize = sizeof(uint32_t) * 2;
-        uint32_t imageSizeLE = HostToLE(image.GetSize());
+        // The protocol header carries a 32-bit size.  Previously the totals
+        // below were plain ints, so an image of 2 GB or more made
+        // totalTransferSize negative, skipped the send loop entirely and
+        // reported success without sending any data.
+        const size_t imageSize = image.GetSize();
+        if (imageSize > std::numeric_limits<uint32_t>::max()) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Image " << image.GetName() << " is too large for the "
+                "32-bit size header: " << imageSize << " bytes" << endLog;
+            return -1;
+        }
+
+        const size_t imageHeaderSize = sizeof(uint32_t) * 2;
+        uint32_t imageSizeLE = HostToLE(static_cast<uint32_t>(imageSize));
         std::memset(m_imageBuffer, 0, imageHeaderSize);
         std::memcpy(m_imageBuffer, &imageSizeLE, sizeof(imageSizeLE));
 
-        const int totalTransferSize = image.GetSize() + imageHeaderSize;
+        const size_t totalTransferSize = imageSize + imageHeaderSize;
 
         ret = m_usbDevice->Write(m_imageBuffer, imageHeaderSize, &transferred);
         if (ret < 0) {
             log(ASTRA_LOG_LEVEL_ERROR) << "Failed to write image header" << endLog;
             return ret;
         }
-        totalTransferred += transferred;
+        totalTransferred += static_cast<size_t>(transferred);
 
         if (!ShouldSuppressImageStatus(image.GetName())) {
             ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS,
@@ -434,12 +467,20 @@ private:
                 return -1;
             }
 
+            if (dataBlockSize == 0) {
+                // End of file before the expected size; without this the loop
+                // would spin forever writing nothing.
+                log(ASTRA_LOG_LEVEL_ERROR) << "Image " << image.GetName() << " ended after "
+                    << totalTransferred << " of " << totalTransferSize << " bytes" << endLog;
+                return -1;
+            }
+
             ret = m_usbDevice->Write(m_imageBuffer, dataBlockSize, &transferred);
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to write image data" << endLog;
                 return ret;
             }
-            totalTransferred += transferred;
+            totalTransferred += static_cast<size_t>(transferred);
 
             if (!ShouldSuppressImageStatus(image.GetName())) {
                 ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS,
