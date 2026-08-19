@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 
 #include "astra_log.hpp"
@@ -233,6 +234,14 @@ bool FastBootDevice::StageFile(const std::string &path,
         return false;
     }
 
+    // The fastboot download command encodes the size as exactly 8 hex digits,
+    // so anything above 4 GiB - 1 would produce a malformed command.
+    if (fileSize > std::numeric_limits<uint32_t>::max()) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: file too large for fastboot download: "
+            << path << " (" << fileSize << " bytes)" << endLog;
+        return false;
+    }
+
     // Send download:<size> command
     std::ostringstream cmdStream;
     cmdStream << "download:" << std::setw(8) << std::setfill('0') << std::hex << fileSize;
@@ -242,6 +251,14 @@ bool FastBootDevice::StageFile(const std::string &path,
     const std::string result = ExecuteCommand(downloadCmd, acceptedSize, timeoutMs);
     if (result != "DATA") {
         log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: download command failed (result=" << result << ")" << endLog;
+        return false;
+    }
+
+    // The device echoes the size it will accept.  Streaming the whole file
+    // when it expects a different length desynchronises the protocol.
+    if (acceptedSize != static_cast<uint32_t>(fileSize)) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: device accepted " << acceptedSize
+            << " bytes but the file is " << fileSize << " bytes" << endLog;
         return false;
     }
 
@@ -271,6 +288,14 @@ bool FastBootDevice::StageFile(const std::string &path,
         const int ret = m_usbDevice->Write(chunk.data(), bytesRead, &transferred);
         if (ret < 0) {
             log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: file data write failed" << endLog;
+            return false;
+        }
+
+        if (transferred < 0 || static_cast<size_t>(transferred) != bytesRead) {
+            // A short write would silently skip the unsent bytes, because the
+            // next iteration reads on from the current file position.
+            log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: short write: sent " << transferred
+                << " of " << bytesRead << " bytes" << endLog;
             return false;
         }
 
