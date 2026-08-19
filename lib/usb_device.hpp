@@ -58,10 +58,10 @@ protected:
     std::string m_usbPath;
     int m_interfaceNumber;
 
-    std::mutex m_writeCompleteMutex;
-    std::condition_variable m_writeCompleteCV;
-    std::atomic<bool> m_writeComplete = false;
-
+    // Write-completion signalling lives in LibUSBDevice, the only transport
+    // with asynchronous writes.  It used to be declared here as well, shadowed
+    // by an identical set in LibUSBDevice; the base copies were never waited
+    // on, so the CDC transports' notify_all() calls on them did nothing.
     std::function<void(USBEvent event, uint8_t *buf, size_t size)> m_usbEventCallback;
 
     // Async callback processing

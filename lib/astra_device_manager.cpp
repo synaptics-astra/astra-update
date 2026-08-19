@@ -277,7 +277,6 @@ private:
     // Written from device threads via ResponseCallback, read by Shutdown().
     std::atomic<bool> m_removeTempOnClose{false};
     bool m_runContinuously = false;
-    bool m_deviceFound = false;
     bool m_usbDebug = false;
     AstraTransportType m_transportType = ASTRA_TRANSPORT_USB;
     AstraDeviceSeries m_deviceSeries = ASTRA_SERIES_SL16XX;
@@ -724,8 +723,6 @@ private:
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Shutting down, not starting device thread" << endLog;
                 return;
             }
-
-            m_deviceFound = true;
 
             // The thread is created and registered under the same lock so it
             // is always visible to Shutdown().  It sets 'finished' only after
