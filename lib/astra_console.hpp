@@ -27,6 +27,7 @@ private:
     const std::string m_uBootPrompt = "=>";
     std::condition_variable m_promptCV;
     std::mutex m_promptMutex;
+    bool m_promptDetected = false;  // guarded by m_promptMutex
     std::atomic<bool> m_shutdown{false};
     std::ofstream m_consoleLog;
 };
