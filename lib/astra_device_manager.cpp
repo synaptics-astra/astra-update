@@ -659,9 +659,22 @@ private:
 
         log(ASTRA_LOG_LEVEL_DEBUG) << "Device added AstraDeviceManagerImpl::DeviceAddedCallback" << endLog;
 
+        // Only probe when some impl is actually waiting to be rebound.
+        // Probing opens the device and sends it a fastboot getvar, and a
+        // manifest may well use generic fastboot IDs that other vendors'
+        // devices share (an Android phone in fastboot mode, say).  With an
+        // empty registry the probe could never match anything, so skipping it
+        // avoids poking unrelated hardware on first arrival.
+        bool haveRebindCandidates = false;
+        {
+            std::lock_guard<std::mutex> lock(m_devicesMutex);
+            haveRebindCandidates = !m_fastbootDeviceBySerial.empty();
+        }
+
         // If this looks like a fastboot device, probe its serial to see whether
         // an existing impl is waiting for a rebind (Sessions 3+).
-        if (m_fastbootVid != 0 && m_fastbootPid != 0 &&
+        if (haveRebindCandidates &&
+            m_fastbootVid != 0 && m_fastbootPid != 0 &&
             device->GetVendorId() == m_fastbootVid &&
             device->GetProductId() == m_fastbootPid)
         {
