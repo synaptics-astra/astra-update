@@ -62,21 +62,12 @@ void WinUSBCDCTransport::Shutdown()
             }
         }
 
-        if (m_hWnd) {
-            PostMessage(m_hWnd, WM_QUIT, 0, 0);
-            if (m_hotplugThread.joinable()) {
-                m_hotplugThread.join();
-            }
-
-            if (m_hDevNotify) {
-                UnregisterDeviceNotification(m_hDevNotify);
-                m_hDevNotify = nullptr;
-            }
-
-            DestroyWindow(m_hWnd);
-            UnregisterClassA("AstraCDCDeviceManager", GetModuleHandle(nullptr));
-            m_hWnd = nullptr;
-        } else if (m_hotplugThread.joinable()) {
+        // The hotplug thread observes m_running (cleared above) and destroys
+        // the window, the device notification and the class registration on
+        // its way out.  That teardown must happen on the thread that created
+        // the window: DestroyWindow() fails from any other thread, so doing it
+        // here silently leaked the window and left the class registered.
+        if (m_hotplugThread.joinable()) {
             m_hotplugThread.join();
         }
 
@@ -120,11 +111,31 @@ void WinUSBCDCTransport::RunHotplugHandler()
         log(ASTRA_LOG_LEVEL_WARNING) << "Failed to register CDC device notifications: " << GetLastError() << endLog;
     }
 
+    // Poll for messages rather than blocking in GetMessage().  Shutdown()
+    // signals the exit by clearing m_running: it cannot post to this window,
+    // because the window may not exist yet at the moment Shutdown() runs.
     MSG msg;
-    while (GetMessage(&msg, nullptr, 0, 0) > 0) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    while (m_running.load()) {
+        if (MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT) != WAIT_OBJECT_0) {
+            continue; // timed out or failed; re-check m_running
+        }
+
+        while (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
     }
+
+    // Tear down on the creating thread (see Shutdown()).
+    if (m_hDevNotify) {
+        UnregisterDeviceNotification(m_hDevNotify);
+        m_hDevNotify = nullptr;
+    }
+
+    DestroyWindow(m_hWnd);
+    m_hWnd = nullptr;
+
+    UnregisterClassA(wc.lpszClassName, wc.hInstance);
 }
 
 LRESULT CALLBACK WinUSBCDCTransport::WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
