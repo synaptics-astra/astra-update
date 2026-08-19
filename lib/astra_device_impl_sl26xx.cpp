@@ -35,6 +35,7 @@ constexpr uint8_t kServiceIdBoot = 0x33;
 constexpr uint8_t kHostApiServiceId = 0x0D;
 
 constexpr uint8_t kOpcodeVersion = 0x0A;
+constexpr uint8_t kOpcodeSpkVersion = 0x03;
 constexpr uint8_t kOpcodeRunImage = 0x0B;
 constexpr uint8_t kOpcodeExec0C = 0x0C;
 constexpr uint8_t kOpcodeUpload = 0x12;
@@ -42,6 +43,7 @@ constexpr uint8_t kOpcodeUpload = 0x12;
 constexpr uint8_t kOpcodeUploadKey = 0x01;
 constexpr uint8_t kOpcodeUploadSpk = 0x02;
 constexpr uint8_t kOpcodeUploadM52Bl = 0x04;
+constexpr uint32_t kSpkVersionKeyResendThreshold = 0xA0030700U;
 
 constexpr uint8_t kHostApiOpcodeGeneric = 0x12;
 constexpr uint8_t kHostApiOpcodeVersion = 0x0A;
@@ -239,7 +241,7 @@ public:
         if (resolvedMode == SL26XXDeviceMode::SL26XX_DEVICE_MODE_BOOTROM) {
             if (!RunSpkBootSequence(*bootImage)) {
                 m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
-                ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX key/spk/m52bl boot sequence");
+                ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to run SL26XX key/spk/key/m52bl boot sequence");
                 return -1;
             }
 
@@ -769,6 +771,54 @@ private:
         return true;
     }
 
+    bool GetSPKVersion(uint32_t &version)
+    {
+        ASTRA_LOG;
+
+        version = 0;
+
+        std::vector<uint8_t> packet;
+        packet.reserve(kOpHeaderSize);
+        packet.push_back(kHostSync1);
+        packet.push_back(kHostSync2);
+        packet.push_back(kServiceIdBoot);
+        packet.push_back(kOpcodeSpkVersion);
+        AppendU32LE(packet, 0);
+        AppendU32LE(packet, 0);
+        AppendU32LE(packet, 0);
+        AppendU32LE(packet, 0);
+        AppendU32LE(packet, 0);
+        AppendU32LE(packet, 0);
+        AppendU32LE(packet, 0);
+
+        ClearRxBuffer();
+
+        if (!WriteAll(packet.data(), packet.size())) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX BL version request" << endLog;
+            return false;
+        }
+
+        std::vector<uint8_t> responseHeader;
+        if (!ReadExactBytes(kHostHeaderSize, responseHeader, std::chrono::seconds(2))) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX BL version response" << endLog;
+            return false;
+        }
+
+        if (responseHeader[0] != kHostSync1 || responseHeader[1] != kHostSync2) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX BL version response" << endLog;
+            return false;
+        }
+
+        // BL VERSION typically encodes version in response header bytes [4..7].
+        version = ReadU32LE(&responseHeader[4]);
+
+        // Some ROM variants append an extra 4-byte word after the response header.
+        std::vector<uint8_t> trailing;
+        (void)ReadExactBytes(sizeof(uint32_t), trailing, std::chrono::milliseconds(50));
+
+        return true;
+    }
+
     bool GetSysMgrVersion(uint32_t &version)
     {
         ASTRA_LOG;
@@ -919,7 +969,8 @@ private:
         }
 
         log(ASTRA_LOG_LEVEL_INFO) << "SL26XX run-spk: uploading " << keyImage->GetName() << ", "
-                                  << spkImage->GetName() << ", and " << m52BlImage->GetName() << endLog;
+                                  << spkImage->GetName() << ", " << keyImage->GetName() << ", and "
+                                  << m52BlImage->GetName() << endLog;
 
         if (!SendSpkFile(keyImage->GetPath(), keyImage->GetName(), kOpcodeUploadKey)) {
             return false;
@@ -928,6 +979,27 @@ private:
         if (!SendSpkFile(spkImage->GetPath(), spkImage->GetName(), kOpcodeUploadSpk)) {
             return false;
         }
+
+        uint32_t spkVersion = 0;
+        if (!GetSPKVersion(spkVersion)) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to read SPK version" << endLog;
+            return false;
+        }
+
+
+        log(ASTRA_LOG_LEVEL_INFO) << "SL26XX SPK version: " << VersionToString(spkVersion)
+                                  << " (0x" << std::hex << std::uppercase << spkVersion
+                                  << std::dec << ")" << endLog;
+
+#if 0
+        if (spkVersion >= kSpkVersionKeyResendThreshold) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX SPK version supports resending key image" << endLog;
+            if (!SendSpkFile(keyImage->GetPath(), keyImage->GetName(), kOpcodeUploadKey)) {
+                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to resend key image" << endLog;
+                return false;
+            }
+        }
+#endif
 
         if (!SendSpkFile(m52BlImage->GetPath(), m52BlImage->GetName(), kOpcodeUploadM52Bl)) {
             return false;
