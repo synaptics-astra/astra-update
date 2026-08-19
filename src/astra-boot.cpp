@@ -11,6 +11,7 @@
 #include <indicators/dynamic_progress.hpp>
 #include <unordered_map>
 #include <csignal>
+#include <chrono>
 
 #include "astra_device_manager.hpp"
 #include "flash_image.hpp"
@@ -89,11 +90,17 @@ void UpdateSimpleProgress(DeviceResponse &deviceResponse)
                 << " Progress: " << deviceResponse.m_progress << std::endl;
 }
 
+// Signal handlers may only touch lock-free atomics; notifying a condition
+// variable from here locks an internal mutex, which is undefined behaviour in
+// a signal handler and can deadlock if the signal lands on a thread already
+// holding it.  The response loop polls 'running' via wait_for() instead.
+static_assert(std::atomic<bool>::is_always_lock_free,
+    "SignalHandler stores to 'running' from a signal handler; it must be lock-free");
+
 void SignalHandler(int signal)
 {
     if (signal == SIGINT) {
         running.store(false);
-        managerResponsesCV.notify_all();
     }
 }
 
@@ -195,10 +202,17 @@ int main(int argc, char* argv[])
     if (running.load()) {
         while (true) {
             std::unique_lock<std::mutex> lock(managerResponsesMutex);
-            managerResponsesCV.wait(lock, []{ return !managerResponses.empty() || !running.load(); });
+            // Time-bounded so a SIGINT that only sets 'running' is noticed;
+            // the handler cannot safely notify the condition variable.
+            managerResponsesCV.wait_for(lock, std::chrono::milliseconds(100),
+                []{ return !managerResponses.empty() || !running.load(); });
 
             if (!running.load()) {
                 break;
+            }
+
+            if (managerResponses.empty()) {
+                continue; // woke on the timeout with nothing queued
             }
 
             auto status = managerResponses.front();
