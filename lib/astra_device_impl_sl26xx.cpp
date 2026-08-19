@@ -316,7 +316,7 @@ public:
                     // we are NOT in rebind-mode (rebind-mode waits for a reconnect).
                     if (!m_rebindArmed.load()) {
                         m_running.store(false);
-                        m_deviceEventCV.notify_all();
+                        SignalDeviceEvent();
                     }
                 })) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open fastboot device" << endLog;
@@ -1239,13 +1239,13 @@ private:
         if (!m_fastbootDevice->Open([this]() {
                 if (!m_rebindArmed.load()) {
                     m_running.store(false);
-                    m_deviceEventCV.notify_all();
+                    SignalDeviceEvent();
                 }
             })) {
             log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: failed to open new device after rebind" << endLog;
             m_fastbootDevice.reset();
             m_running.store(false);
-            m_deviceEventCV.notify_all();
+            SignalDeviceEvent();
             m_rebindCV.notify_all();
             return;
         }
@@ -1308,7 +1308,7 @@ private:
                     continue;
                 }
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return false;
             }
 
@@ -1331,7 +1331,7 @@ private:
                         m_rebindArmed.store(false);
                         m_fbExitPending.store(false);
                         m_running.store(false);
-                        m_deviceEventCV.notify_all();
+                        SignalDeviceEvent();
                         return false;
                     }
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: fb_exit pending, waiting for rebind" << endLog;
@@ -1341,7 +1341,7 @@ private:
                         continue;
                     }
                     m_running.store(false);
-                    m_deviceEventCV.notify_all();
+                    SignalDeviceEvent();
                     return false;
                 }
                 // Non-rebind mode: fall through to the GetVar attempt below.
@@ -1367,7 +1367,7 @@ private:
                     log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX failed to get fb_command" << endLog;
                 }
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return false;
             }
 
@@ -1383,7 +1383,7 @@ private:
                 if (parts.empty() || parts[0] != "stage" || parts.size() < 2) {
                     log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX unexpected fb_command: " << fbCommand << endLog;
                     m_running.store(false);
-                    m_deviceEventCV.notify_all();
+                    SignalDeviceEvent();
                     return false;
                 }
 

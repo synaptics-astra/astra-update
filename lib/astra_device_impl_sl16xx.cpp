@@ -133,24 +133,25 @@ public:
         ASTRA_LOG;
 
         if (m_uEnvSupport || m_ubootConsole == ASTRA_UBOOT_CONSOLE_UART) {
-            for (;;) {
+            // Wait with a predicate: every signaller sets m_running = false
+            // before notifying, so waiting on the bare CV (as this code
+            // previously did) missed notifications sent before, or between,
+            // waits and hung forever.
+            {
                 std::unique_lock<std::mutex> lock(m_deviceEventMutex);
-                m_deviceEventCV.wait(lock);
-                if (m_bootOnly) {
-                    if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
-                        // Device successfully reset after boot.
-                        ReportStatus(m_status, 100, "", "Success");
-                    }
-                } else {
-                    if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
-                        // Device successfully reset after update.
-                        ReportStatus(m_status, 100, "", "Success");
-                    }
-                }
+                m_deviceEventCV.wait(lock, [this] { return !m_running.load(); });
+            }
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Device event received: shutting down" << endLog;
 
-                if (!m_running.load()) {
-                    log(ASTRA_LOG_LEVEL_DEBUG) << "Device event received: shutting down" << endLog;
-                    break;
+            if (m_bootOnly) {
+                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+                    // Device successfully reset after boot.
+                    ReportStatus(m_status, 100, "", "Success");
+                }
+            } else {
+                if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                    // Device successfully reset after update.
+                    ReportStatus(m_status, 100, "", "Success");
                 }
             }
         } else if (m_ubootConsole == ASTRA_UBOOT_CONSOLE_USB) {
@@ -353,7 +354,7 @@ private:
             }
 
             m_running.store(false);
-            m_deviceEventCV.notify_all();
+            SignalDeviceEvent();
         }
     }
 
