@@ -5,50 +5,69 @@
 #include <iostream>
 #include <mutex>
 #include <chrono>
+#include <ctime>
 
 std::unique_ptr<AstraLogStore> AstraLogStore::instance;
 std::once_flag AstraLogStore::initInstanceFlag;
 
 AstraLog::AstraLog(const std::string &funcName) : m_funcName{funcName}, m_logLevel{ASTRA_LOG_LEVEL_NONE}
 {
-    AstraLogStore::getInstance().Log(ASTRA_LOG_LEVEL_TRACE,
-        AstraLog::FormatLog(ASTRA_LOG_LEVEL_TRACE, m_funcName, "-> Entering"));
+    // Check the level before formatting: these trace records are emitted on
+    // every function entry/exit, including per-transfer USB hot paths, and
+    // formatting them only to have Log() filter them out is pure overhead.
+    if (AstraLogStore::getInstance().ShouldLog(ASTRA_LOG_LEVEL_TRACE)) {
+        AstraLogStore::getInstance().Log(ASTRA_LOG_LEVEL_TRACE,
+            AstraLog::FormatLog(ASTRA_LOG_LEVEL_TRACE, m_funcName, "-> Entering"));
+    }
 }
 
 AstraLog::~AstraLog()
 {
-    AstraLogStore::getInstance().Log(ASTRA_LOG_LEVEL_TRACE,
-        AstraLog::FormatLog(ASTRA_LOG_LEVEL_TRACE, m_funcName, "<- Exiting"));
+    if (AstraLogStore::getInstance().ShouldLog(ASTRA_LOG_LEVEL_TRACE)) {
+        AstraLogStore::getInstance().Log(ASTRA_LOG_LEVEL_TRACE,
+            AstraLog::FormatLog(ASTRA_LOG_LEVEL_TRACE, m_funcName, "<- Exiting"));
+    }
 }
 
 AstraLog & AstraLog::operator()(AstraLogLevel level) {
     m_logLevel = level;
+    m_enabled = AstraLogStore::getInstance().ShouldLog(level);
     return *this;
 }
 
 AstraLog & AstraLog::operator<<(const char *str) {
-    m_os << str;
+    if (m_enabled) {
+        m_os << str;
+    }
     return *this;
 }
 
 AstraLog & AstraLog::operator<<(const std::string &str) {
-    m_os << str;
+    if (m_enabled) {
+        m_os << str;
+    }
     return *this;
 }
 
 AstraLog & AstraLog::operator<<(int val) {
-    m_os << val;
+    if (m_enabled) {
+        m_os << val;
+    }
     return *this;
 }
 
 AstraLog & AstraLog::operator<<(unsigned int val) {
-    m_os << val;
+    if (m_enabled) {
+        m_os << val;
+    }
     return *this;
 }
 
 AstraLog & endLog(AstraLog &log) {
-    AstraLogStore::getInstance().Log(log.m_logLevel,
-        AstraLog::FormatLog(log.m_logLevel, log.m_funcName, log.m_os.str()));
+    if (log.m_enabled) {
+        AstraLogStore::getInstance().Log(log.m_logLevel,
+            AstraLog::FormatLog(log.m_logLevel, log.m_funcName, log.m_os.str()));
+    }
     log.m_os.str("");
     return log;
 }
@@ -83,7 +102,14 @@ std::string AstraLog::FormatLog(AstraLogLevel logLevel, const std::string &funcN
     std::ostringstream os;
     auto now = std::chrono::system_clock::now();
     auto t = std::chrono::system_clock::to_time_t(now);
-    auto tm = *std::localtime(&t);
+    // std::localtime returns a shared static buffer and is not thread-safe;
+    // this runs concurrently from every logging thread.
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
 
     // Get microseconds
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()) % 1000000;
@@ -110,7 +136,8 @@ AstraLogStore& AstraLogStore::getInstance() {
 }
 
 void AstraLogStore::Open(const std::string &logPath, AstraLogLevel minLogLevel) {
-    m_minLogLevel = minLogLevel;
+    std::lock_guard<std::mutex> lock(m_logMutex);
+    m_minLogLevel.store(minLogLevel, std::memory_order_relaxed);
 
     if (logPath == "" || logPath == "stdout") {
         m_logStream = std::make_unique<std::ostream>(std::cout.rdbuf());
@@ -121,18 +148,27 @@ void AstraLogStore::Open(const std::string &logPath, AstraLogLevel minLogLevel) 
         }
         m_logStream = std::make_unique<std::ostream>(m_logFile.rdbuf());
     }
+
+    m_opened.store(true, std::memory_order_relaxed);
 }
 
 void AstraLogStore::Close() {
+    std::lock_guard<std::mutex> lock(m_logMutex);
+    // Clear m_opened first so ShouldLog() steers new messages away, then
+    // drop the stream under the lock so an in-flight Log() cannot write to
+    // a closed file.
+    m_opened.store(false, std::memory_order_relaxed);
+    m_logStream.reset();
     if (m_logFile.is_open()) {
         m_logFile.close();
     }
 }
 
 void AstraLogStore::Log(AstraLogLevel level, const std::string& message) {
+    std::lock_guard<std::mutex> lock(m_logMutex);
     if (m_logStream) {
-        if (level >= m_minLogLevel) {
-            *m_logStream << message << std::endl;
+        if (level >= m_minLogLevel.load(std::memory_order_relaxed)) {
+            *m_logStream << message << '\n';
             m_logStream->flush();
         }
     }
