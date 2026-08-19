@@ -40,9 +40,15 @@ public:
         if (tempDir.empty()) {
             m_tempDir = MakeTempDirectory();
             if (m_tempDir.empty()) {
+                // Fall back to the working directory so the tool still runs,
+                // but never schedule it for deletion: Shutdown() would call
+                // remove_all("./") and destroy the user's files.
                 m_tempDir = "./";
+                m_removeTempOnClose = false;
+            } else {
+                // Only a directory we created ourselves is ours to delete.
+                m_removeTempOnClose = true;
             }
-            m_removeTempOnClose = true;
         } else {
             m_tempDir = tempDir;
             std::filesystem::create_directories(m_tempDir);
@@ -236,7 +242,13 @@ public:
 
         AstraLogStore::getInstance().Close();
 
-        if (m_removeTempOnClose.load()) {
+        // Guard the path as well as the flag: remove_all() on the working
+        // directory or the filesystem root would be catastrophic, and this
+        // runs unattended.
+        const bool tempDirIsRemovable = !m_tempDir.empty() &&
+            m_tempDir != "." && m_tempDir != "./" && m_tempDir != "/";
+
+        if (m_removeTempOnClose.load() && tempDirIsRemovable) {
             try {
                 std::filesystem::remove_all(m_tempDir);
             } catch (const std::exception& e) {
