@@ -55,9 +55,28 @@ void USBDevice::CallbackWorkerThread()
             }
         }
 
-        // Call the callback outside the lock to avoid blocking the queue
-        if (m_usbEventCallback) {
+        // Run outside the lock to avoid blocking the queue
+        if (event.action) {
+            event.action();
+        } else if (m_usbEventCallback) {
             m_usbEventCallback(event.event, event.data.empty() ? nullptr : event.data.data(), event.data.size());
         }
     }
+}
+
+void USBDevice::QueueCallbackAction(std::function<void()> action)
+{
+    ASTRA_LOG;
+
+    if (!action) {
+        return;
+    }
+
+    CallbackEvent event;
+    event.action = std::move(action);
+    {
+        std::lock_guard<std::mutex> lock(m_callbackQueueMutex);
+        m_callbackQueue.push(std::move(event));
+    }
+    m_callbackQueueCV.notify_one();
 }
