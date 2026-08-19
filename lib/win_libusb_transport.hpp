@@ -30,7 +30,6 @@ private:
     void DeviceEnumerationWorker();
     void ProcessPendingDevices();
 
-    std::function<void(std::unique_ptr<USBDevice>)> m_deviceAddedCallback;
     HWND m_hWnd;
     HDEVNOTIFY m_hDevNotify;
     HANDLE m_hCriticalSectionMutex;  // Serializes critical boot section across all instances
