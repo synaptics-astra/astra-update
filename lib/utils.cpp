@@ -8,6 +8,7 @@
 #include <iostream>
 #include <string>
 #include <stdint.h>
+#include <atomic>
 #include <sstream>
 #include <iomanip>
 
@@ -47,23 +48,43 @@ uint32_t HostToLE(uint32_t val)
 std::string MakeTempDirectory()
 {
     char tempPath[MAX_PATH];
-    if (GetTempPath(MAX_PATH, tempPath) == 0)
+    const DWORD tempPathLength = GetTempPathA(MAX_PATH, tempPath);
+    if (tempPathLength == 0 || tempPathLength > MAX_PATH)
     {
-        throw std::runtime_error("Failed to get temp path");
+        // Return empty rather than throwing, matching the POSIX
+        // implementation and the caller's contract.
+        return "";
     }
 
-    // Generate a unique directory name
-    std::stringstream ss;
-    ss << tempPath << "TMP" << std::setw(8) << std::setfill('0') << GetTickCount();
+    // Name the directory from the process id plus a per-process counter, and
+    // retry on collision.  The previous name was GetTempPath() + "TMP" +
+    // GetTickCount(), so two instances starting within the same tick chose the
+    // same directory and the loser threw -- and flashing several boards at
+    // once, which runs several instances concurrently, is a supported
+    // workflow.
+    static std::atomic<unsigned int> counter{0};
+    const DWORD processId = GetCurrentProcessId();
 
-    std::string tempDir = ss.str();
-
-    if (!CreateDirectory(tempDir.c_str(), NULL))
+    for (int attempt = 0; attempt < 64; ++attempt)
     {
-        throw std::runtime_error("Failed to create temp directory");
+        std::ostringstream ss;
+        ss << tempPath << "astra-update-" << processId << "-" << GetTickCount()
+           << "-" << counter.fetch_add(1);
+
+        const std::string tempDir = ss.str();
+
+        if (CreateDirectoryA(tempDir.c_str(), nullptr))
+        {
+            return tempDir;
+        }
+
+        if (GetLastError() != ERROR_ALREADY_EXISTS)
+        {
+            return "";
+        }
     }
 
-    return tempDir;
+    return "";
 }
 
 uint32_t HostToLE(uint32_t val)
