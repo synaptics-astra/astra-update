@@ -143,7 +143,7 @@ void AstraDeviceImpl::StopImageRequestThread()
     ASTRA_LOG;
 
     m_running.store(false);
-    m_deviceEventCV.notify_all();
+    SignalDeviceEvent();
     WakeImageRequestThread();
 
     if (m_imageRequestThread.joinable()) {
@@ -188,7 +188,7 @@ void AstraDeviceImpl::RunImageRequestLoop()
 
         if (!m_running.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Image request loop: shutting down" << endLog;
-            m_deviceEventCV.notify_all();
+            SignalDeviceEvent();
             return;
         }
 
@@ -200,28 +200,28 @@ void AstraDeviceImpl::RunImageRequestLoop()
                 ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "",
                     "Timeout during boot, press RESET while holding USB_BOOT to try again");
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return;
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return;
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && m_bootOnly) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Boot-only complete: shutting down image request thread" << endLog;
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return;
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_BOOT_START) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Boot failed to start" << endLog;
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return;
             }
 
@@ -262,7 +262,7 @@ void AstraDeviceImpl::RunImageRequestLoop()
                         << " while in " << AstraDevice::AstraDeviceStatusToString(m_status) << endLog;
                 }
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return;
             }
 
@@ -297,7 +297,7 @@ void AstraDeviceImpl::RunImageRequestLoop()
                 }
                 OnImageSent(image, false);
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return;
             }
 
