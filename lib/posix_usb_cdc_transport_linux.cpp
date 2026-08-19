@@ -27,7 +27,9 @@ struct PosixUSBCDCTransport::Impl {
     int m_wakeupPipe[2] = {-1, -1};
     std::thread m_udevThread;
 
-    ~Impl()
+    // Wake the udev monitor thread and join it.  Idempotent: the pipe write
+    // end is cleared on the first call and the thread is joined only once.
+    void Stop()
     {
         if (m_wakeupPipe[1] >= 0) {
             const char c = 0;
@@ -42,6 +44,12 @@ struct PosixUSBCDCTransport::Impl {
             close(m_wakeupPipe[0]);
             m_wakeupPipe[0] = -1;
         }
+    }
+
+    ~Impl()
+    {
+        // Safety net: Shutdown() normally stops the monitor first.
+        Stop();
     }
 };
 
@@ -168,6 +176,16 @@ void PosixUSBCDCTransport::StartDeviceMonitor()
     }
 
     m_impl->m_udevThread = std::thread(&PosixUSBCDCTransport::UdevMonitorThread, this);
+}
+
+// ---------------------------------------------------------------------------
+// StopPlatformMonitor — called from USBCDCTransport::Shutdown()
+// ---------------------------------------------------------------------------
+
+void PosixUSBCDCTransport::StopPlatformMonitor()
+{
+    ASTRA_LOG;
+    m_impl->Stop();
 }
 
 // ---------------------------------------------------------------------------

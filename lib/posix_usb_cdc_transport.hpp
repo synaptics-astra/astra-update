@@ -20,6 +20,7 @@ public:
 private:
     void ProcessPendingDevices() override;
     void StartDeviceMonitor() override;
+    void StopPlatformMonitor() override;
     std::vector<std::string> EnumerateCandidatePorts() const;
     bool MatchesVendorProduct(const std::string& portPath) const;
 
