@@ -576,7 +576,8 @@ int LibUSBDevice::WriteInterruptData(const uint8_t *data, size_t size)
         return -1;
     }
 
-    if (size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    // Parenthesized to avoid collision with the windows.h max() macro
+    if (size > static_cast<size_t>((std::numeric_limits<int>::max)())) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Interrupt out data size too large: " << size << endLog;
         return -1;
     }
