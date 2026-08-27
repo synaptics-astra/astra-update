@@ -310,17 +310,25 @@ public:
             // Device is in fastboot mode; open the fastboot transport and start the
             // shared image-serving loop.  Boot and update images are served from the
             // same loop — Update() simply appends flash images while the loop runs.
-            m_fastbootDevice = std::make_unique<FastBootDevice>(m_usbDevice.get());
-            if (!m_fastbootDevice->Open([this]() {
+            bool fastbootOpened = false;
+            {
+                std::lock_guard<std::mutex> lock(m_deviceMutex);
+                m_fastbootDevice = std::make_unique<FastBootDevice>(m_usbDevice.get());
+                fastbootOpened = m_fastbootDevice->Open([this]() {
                     // Disconnect during an active session: only stop the image loop if
                     // we are NOT in rebind-mode (rebind-mode waits for a reconnect).
                     if (!m_rebindArmed.load()) {
                         m_running.store(false);
-                        m_deviceEventCV.notify_all();
+                        SignalDeviceEvent();
                     }
-                })) {
+                });
+                if (!fastbootOpened) {
+                    m_fastbootDevice.reset();
+                }
+            }
+
+            if (!fastbootOpened) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open fastboot device" << endLog;
-                m_fastbootDevice.reset();
                 m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
                 ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to open fastboot device");
                 return -1;
@@ -331,7 +339,13 @@ public:
             // so the image-serving loop survives the fb_exit disconnects.
             {
                 std::string serialno;
-                if (m_fastbootDevice->GetVar("serialno", serialno) && IsAstraUuid(serialno)) {
+                bool haveSerial = false;
+                {
+                    std::lock_guard<std::mutex> lock(m_deviceMutex);
+                    haveSerial = m_fastbootDevice && m_fastbootDevice->GetVar("serialno", serialno);
+                }
+
+                if (haveSerial && IsAstraUuid(serialno)) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: UUID serial '" << serialno
                         << "' found, arming rebind-mode" << endLog;
                     m_updateSessionUuid = serialno;
@@ -443,18 +457,27 @@ public:
         // m_fastbootDevice until it observes m_running=false and exits.
         StopImageRequestThread();
 
-        // Close the underlying USB device (stops and joins its callback
-        // thread) BEFORE destroying FastBootDevice -- the callback thread
-        // may still be draining its queue and calling
-        // FastBootDevice::USBEventHandler; resetting m_fastbootDevice first
-        // would leave that thread with a dangling 'this'.
-        if (m_usbDevice != nullptr) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Closing USB device" << endLog;
-            m_usbDevice->Close();
-        }
-        m_status = ASTRA_DEVICE_STATUS_CLOSED;
+        // Take m_deviceMutex only after the image-request loop has been
+        // joined: the loop holds it while talking to the device, so blocking
+        // on it before the join could wait for a transfer that is itself
+        // waiting for this shutdown.
+        {
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
 
-        m_fastbootDevice.reset();
+            // Close the underlying USB device (stops and joins its callback
+            // thread) BEFORE destroying FastBootDevice -- the callback thread
+            // may still be draining its queue and calling
+            // FastBootDevice::USBEventHandler; resetting m_fastbootDevice first
+            // would leave that thread with a dangling 'this'.
+            if (m_usbDevice != nullptr) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Closing USB device" << endLog;
+                m_usbDevice->Close();
+            }
+            m_status = ASTRA_DEVICE_STATUS_CLOSED;
+
+            m_fastbootDevice.reset();
+        }
+
         m_deviceOpened = false;
     }
 
@@ -472,6 +495,14 @@ private:
     std::atomic<bool> m_fbExitPending{false};
     std::mutex m_rebindMutex;
     std::condition_variable m_rebindCV;
+
+    // Guards m_usbDevice / m_fastbootDevice against concurrent use by the
+    // image-request loop, replacement by Rebind() (which runs on the
+    // transport callback thread), and teardown by Close().
+    //
+    // Never held across WaitForRebind(): the Rebind() that would release the
+    // wait needs this lock itself, so holding it there would deadlock.
+    std::mutex m_deviceMutex;
 
     std::mutex m_rxMutex;
     std::condition_variable m_rxCV;
@@ -1212,6 +1243,14 @@ private:
     {
         ASTRA_LOG;
 
+        // Hold m_deviceMutex across the whole swap.  The image-request loop
+        // uses m_fastbootDevice under this lock and Close() tears both devices
+        // down under it, so without this the loop could be mid-transfer on the
+        // device being destroyed here.  m_shutdown is re-checked while holding
+        // the lock so a Close() already in progress cannot have its teardown
+        // undone by a late rebind.
+        std::lock_guard<std::mutex> deviceLock(m_deviceMutex);
+
         if (m_shutdown.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX Rebind: impl already closed, ignoring" << endLog;
             return;
@@ -1239,13 +1278,13 @@ private:
         if (!m_fastbootDevice->Open([this]() {
                 if (!m_rebindArmed.load()) {
                     m_running.store(false);
-                    m_deviceEventCV.notify_all();
+                    SignalDeviceEvent();
                 }
             })) {
             log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: failed to open new device after rebind" << endLog;
             m_fastbootDevice.reset();
             m_running.store(false);
-            m_deviceEventCV.notify_all();
+            SignalDeviceEvent();
             m_rebindCV.notify_all();
             return;
         }
@@ -1299,7 +1338,16 @@ private:
         auto deadline = std::chrono::steady_clock::now() + timeout;
 
         while (m_running.load() && std::chrono::steady_clock::now() < deadline) {
-            if (!m_fastbootDevice || m_fastbootDevice->IsDisconnected()) {
+            // Sample the device state under the lock, then act on it without
+            // holding it: the branches below can call WaitForRebind(), which
+            // must not run while m_deviceMutex is held.
+            bool disconnected = false;
+            {
+                std::lock_guard<std::mutex> lock(m_deviceMutex);
+                disconnected = (m_fastbootDevice == nullptr) || m_fastbootDevice->IsDisconnected();
+            }
+
+            if (disconnected) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot device disconnected" << endLog;
                 m_fbExitPending.store(false);
                 if (m_rebindArmed.load() && WaitForRebind()) {
@@ -1308,7 +1356,7 @@ private:
                     continue;
                 }
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return false;
             }
 
@@ -1331,7 +1379,7 @@ private:
                         m_rebindArmed.store(false);
                         m_fbExitPending.store(false);
                         m_running.store(false);
-                        m_deviceEventCV.notify_all();
+                        SignalDeviceEvent();
                         return false;
                     }
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: fb_exit pending, waiting for rebind" << endLog;
@@ -1341,7 +1389,7 @@ private:
                         continue;
                     }
                     m_running.store(false);
-                    m_deviceEventCV.notify_all();
+                    SignalDeviceEvent();
                     return false;
                 }
                 // Non-rebind mode: fall through to the GetVar attempt below.
@@ -1353,7 +1401,13 @@ private:
             }
 
             std::string fbCommand;
-            if (!m_fastbootDevice->GetVar("fb_command", fbCommand)) {
+            bool gotCommand = false;
+            {
+                std::lock_guard<std::mutex> lock(m_deviceMutex);
+                gotCommand = m_fastbootDevice && m_fastbootDevice->GetVar("fb_command", fbCommand);
+            }
+
+            if (!gotCommand) {
                 // GetVar failure means the USB connection dropped.
                 if (m_rebindArmed.load()) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: GetVar failed (rebind-mode), waiting for reconnect" << endLog;
@@ -1367,7 +1421,7 @@ private:
                     log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX failed to get fb_command" << endLog;
                 }
                 m_running.store(false);
-                m_deviceEventCV.notify_all();
+                SignalDeviceEvent();
                 return false;
             }
 
@@ -1383,7 +1437,7 @@ private:
                 if (parts.empty() || parts[0] != "stage" || parts.size() < 2) {
                     log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX unexpected fb_command: " << fbCommand << endLog;
                     m_running.store(false);
-                    m_deviceEventCV.notify_all();
+                    SignalDeviceEvent();
                     return false;
                 }
 
@@ -1415,6 +1469,10 @@ private:
     {
         ASTRA_LOG;
 
+        // Held for the whole transfer so a reconnect cannot swap the device
+        // out from under an in-flight StageFile.
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
+
         if (!m_fastbootDevice) {
             log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot device not available" << endLog;
             return -1;
@@ -1438,6 +1496,8 @@ private:
     void OnImageSent(const Image &image, bool success) override
     {
         (void)image;
+
+        std::lock_guard<std::mutex> lock(m_deviceMutex);
         if (!m_fastbootDevice) {
             return;
         }

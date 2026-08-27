@@ -144,6 +144,18 @@ protected:
     // BEFORE calling StopImageRequestThread() so the thread wakes promptly.
     void StopImageRequestThread();
 
+    // Wake threads blocked on m_deviceEventCV (e.g. WaitForCompletion).
+    // Notifies while holding m_deviceEventMutex so a waiter that has just
+    // evaluated its predicate (and found it false) is guaranteed to be
+    // blocked in wait() before the notification fires; a bare notify_all()
+    // can be lost in that window.  Callers must update the condition the
+    // waiter checks (m_running / m_status) BEFORE calling this.
+    void SignalDeviceEvent()
+    {
+        std::lock_guard<std::mutex> lock(m_deviceEventMutex);
+        m_deviceEventCV.notify_all();
+    }
+
     // -----------------------------------------------------------------------
     // Transport-specific hooks (override in derived classes)
     // -----------------------------------------------------------------------

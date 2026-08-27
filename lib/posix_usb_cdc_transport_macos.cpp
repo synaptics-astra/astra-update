@@ -32,18 +32,30 @@ struct PosixUSBCDCTransport::Impl {
     std::condition_variable m_ioKitCV;
     bool m_ioKitReady{false};
 
-    ~Impl()
+    // Stop the IOKit run loop and join the monitor thread.  Idempotent: once
+    // the thread has been joined it is no longer joinable and this is a no-op.
+    void Stop()
     {
         {
             std::unique_lock<std::mutex> lk(m_ioKitMutex);
-            m_ioKitCV.wait(lk, [this] { return m_ioKitReady || !m_ioKitThread.joinable(); });
+            if (!m_ioKitThread.joinable()) {
+                return;
+            }
+            // Wait for the thread to publish its run loop before stopping it,
+            // otherwise a stop issued too early is missed and CFRunLoopRun()
+            // blocks forever.
+            m_ioKitCV.wait(lk, [this] { return m_ioKitReady; });
             if (m_runLoop) {
                 CFRunLoopStop(m_runLoop);
             }
         }
-        if (m_ioKitThread.joinable()) {
-            m_ioKitThread.join();
-        }
+        m_ioKitThread.join();
+    }
+
+    ~Impl()
+    {
+        // Safety net: Shutdown() normally stops the monitor first.
+        Stop();
     }
 };
 
@@ -249,6 +261,16 @@ void PosixUSBCDCTransport::StartDeviceMonitor()
 }
 
 // ---------------------------------------------------------------------------
+// StopPlatformMonitor — called from USBCDCTransport::Shutdown()
+// ---------------------------------------------------------------------------
+
+void PosixUSBCDCTransport::StopPlatformMonitor()
+{
+    ASTRA_LOG;
+    m_impl->Stop();
+}
+
+// ---------------------------------------------------------------------------
 // IOKit static callbacks
 // ---------------------------------------------------------------------------
 
@@ -345,8 +367,17 @@ void PosixUSBCDCTransport::ProcessIOKitService(io_object_t service)
         << " isComposite="       << isComposite
         << " numInterfaces="     << std::dec << static_cast<int>(numInterfaces) << endLog;
 
-    // Filter against the supported device list when VID/PID are known.
-    if (vendorId != 0 && !m_supportedDevices.empty()) {
+    // Filter against the supported device list.  A port whose VID/PID could
+    // not be read is skipped rather than passed through: we cannot tell an
+    // Astra device from any other cu.usbmodem/cu.usbserial, and opening the
+    // wrong one means writing boot-protocol bytes at unrelated hardware.
+    if (!m_supportedDevices.empty()) {
+        if (vendorId == 0 && productId == 0) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "Skipping " << portPath
+                << ": unable to read its USB vendor/product ID" << endLog;
+            return;
+        }
+
         bool matches = false;
         for (const auto &[v, p] : m_supportedDevices) {
             if (vendorId == v && productId == p) {

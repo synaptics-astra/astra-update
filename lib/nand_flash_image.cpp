@@ -44,7 +44,8 @@ int NandFlashImage::Load()
 
         std::string fullImagePath = m_imagePath + "/" + m_imageFile;
         if (!std::filesystem::exists(fullImagePath)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "NAND image file not found: " << fullImagePath << endLog;
+            m_loadError = "NAND image file not found: " + fullImagePath;
+            log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
             return -1;
         }
 
@@ -53,7 +54,8 @@ int NandFlashImage::Load()
     } else {
         m_imageFile = std::filesystem::path(m_imagePath).filename().string();
         if (!std::filesystem::exists(m_imagePath)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "NAND image path does not exist: " << m_imagePath << endLog;
+            m_loadError = "NAND image path does not exist: " + m_imagePath;
+            log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
             return -1;
         }
 
@@ -82,6 +84,20 @@ int NandFlashImage::Load()
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND image file: " << m_imageFile << endLog;
     log(ASTRA_LOG_LEVEL_DEBUG) << "NAND read address: " << m_nandReadAddress << endLog;
+
+    // Both values land in the U-Boot command line below; a manifest that
+    // embeds ';' or whitespace could append arbitrary U-Boot commands.
+    if (!IsSafeUbootFilename(m_imageFile)) {
+        m_loadError = "Unsafe image_file in NAND manifest: '" + m_imageFile + "'";
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
+    }
+
+    if (!IsSafeUbootNumber(m_nandReadAddress)) {
+        m_loadError = "Unsafe read_address in NAND manifest: '" + m_nandReadAddress + "'";
+        log(ASTRA_LOG_LEVEL_ERROR) << m_loadError << endLog;
+        return -1;
+    }
 
     m_flashCommand = "usbload " + m_imageFile + " " + m_nandReadAddress
         + "; m2nand " + m_nandReadAddress;

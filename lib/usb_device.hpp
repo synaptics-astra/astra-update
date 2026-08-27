@@ -58,16 +58,20 @@ protected:
     std::string m_usbPath;
     int m_interfaceNumber;
 
-    std::mutex m_writeCompleteMutex;
-    std::condition_variable m_writeCompleteCV;
-    std::atomic<bool> m_writeComplete = false;
-
+    // Write-completion signalling lives in LibUSBDevice, the only transport
+    // with asynchronous writes.  It used to be declared here as well, shadowed
+    // by an identical set in LibUSBDevice; the base copies were never waited
+    // on, so the CDC transports' notify_all() calls on them did nothing.
     std::function<void(USBEvent event, uint8_t *buf, size_t size)> m_usbEventCallback;
 
     // Async callback processing
     struct CallbackEvent {
-        USBEvent event;
+        USBEvent event{USB_DEVICE_EVENT_TRANSFER_ERROR};
         std::vector<uint8_t> data;
+        // When set, the worker runs this instead of dispatching to the event
+        // callback.  Used to move work off the USB event thread, which must
+        // not block (see QueueCallbackAction).
+        std::function<void()> action;
     };
     std::queue<CallbackEvent> m_callbackQueue;
     std::mutex m_callbackQueueMutex;
@@ -81,6 +85,16 @@ protected:
     std::atomic<bool> m_bulkWriteCancelled{false};
     std::mutex m_cancellationMutex;
     std::condition_variable m_cancellationCV;
+
+    // Queue work to run on the callback worker thread.  Use for anything that
+    // must not run on the USB event-handling thread -- in particular libusb's
+    // synchronous calls, which wait for events that only that thread delivers
+    // and would therefore deadlock it.
+    //
+    // Derived Close() implementations join the worker thread before releasing
+    // the resources an action may touch, so a queued action never outlives
+    // them.
+    void QueueCallbackAction(std::function<void()> action);
 
     void CallbackWorkerThread();
 };

@@ -51,6 +51,11 @@ void USBCDCTransport::Shutdown()
             m_deviceMonitorThread.join();
         }
 
+        // Stop the event-driven monitor (udev / IOKit) before clearing the
+        // active-device set, so a late arrival cannot repopulate it or reach
+        // the device-added callback after Shutdown() returns.
+        StopPlatformMonitor();
+
         std::lock_guard<std::mutex> activeLock(m_activeDevicesMutex);
         m_activeDevices.clear();
     }

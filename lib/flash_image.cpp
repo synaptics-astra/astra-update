@@ -50,6 +50,59 @@ FlashImageType StringToFlashImageType(const std::string& str)
     }
 }
 
+bool IsSafeUbootNumber(const std::string& value)
+{
+    // U-Boot expands $filesize to the size of the last loaded file; it is the
+    // default write length for SL261x.
+    if (value == "$filesize") {
+        return true;
+    }
+
+    if (value.empty()) {
+        return false;
+    }
+
+    size_t index = 0;
+    bool hex = false;
+    if (value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) {
+        index = 2;
+        hex = true;
+    }
+
+    for (; index < value.size(); ++index) {
+        const unsigned char c = static_cast<unsigned char>(value[index]);
+        if (hex ? (std::isxdigit(c) == 0) : (std::isdigit(c) == 0)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool IsSafeUbootFilename(const std::string& value)
+{
+    if (value.empty() || value.size() > 255) {
+        return false;
+    }
+
+    if (value == "." || value == "..") {
+        return false;
+    }
+
+    for (const char ch : value) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (std::isalnum(c) != 0) {
+            continue;
+        }
+        if (ch == '.' || ch == '_' || ch == '-' || ch == '+') {
+            continue;
+        }
+        return false;
+    }
+
+    return true;
+}
+
 std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath, std::map<std::string, std::string> &config, std::string manifest)
 {
     ASTRA_LOG;
@@ -64,6 +117,10 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
             // then try the SYNAIMG directory. Which is the default directory name created by the
             // Yocto build system.
             imagePath = "SYNAIMG";
+            if (!std::filesystem::exists(imagePath)) {
+                throw std::invalid_argument("No update image found: neither eMMCimg nor SYNAIMG "
+                    "exists in the current directory. Use --flash to specify the image path.");
+            }
         } else {
             throw std::invalid_argument("" + imagePath + " not found");
         }

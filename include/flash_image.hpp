@@ -32,6 +32,11 @@ public:
 
     virtual int Load() = 0;
 
+    // Reason for the most recent Load() failure, for callers to report.
+    // Load() runs before the device manager opens the log store, so log
+    // messages emitted from it are otherwise lost.
+    const std::string &GetLoadError() const { return m_loadError; }
+
     std::string GetBootImageId() const { return m_bootImageId; }
     std::string GetChipName() const { return m_chipName; }
     std::string GetBoardName() const { return m_boardName; }
@@ -62,6 +67,7 @@ protected:
     std::vector<Image> m_images;
     std::string m_flashCommand;
     std::string m_finalImage;
+    std::string m_loadError;
     std::unique_ptr<std::vector<std::map<std::string, std::string>>> m_manifestMaps;
     bool m_resetWhenComplete = true;
     const std::string m_resetCommand = "; sleep 1; reset"; // sleep before resetting to let console messages be sent to the host
@@ -78,6 +84,27 @@ struct ChipDetectionResult {
 
 // Helper function to detect chip information from Yocto TAG files
 ChipDetectionResult DetectChipFromTagFile(const std::string& imagePath, const std::string& currentChipName);
+
+// ---------------------------------------------------------------------------
+// U-Boot command-line token validation
+//
+// Flash commands are built by concatenating manifest-supplied values into a
+// U-Boot command line that is then run on the device (via uEnv.txt bootcmd or
+// the console).  Values are separated by spaces and commands by ';', so a
+// manifest that embeds either can append arbitrary U-Boot commands.  Update
+// images are routinely downloaded, so their manifests are not trusted input.
+//
+// These also reject values that would simply produce a broken command line,
+// turning a confusing device-side failure into a clear error at load time.
+// ---------------------------------------------------------------------------
+
+// Accepts a hex literal (0x...), a decimal literal, or the "$filesize"
+// variable U-Boot expands for write lengths.
+bool IsSafeUbootNumber(const std::string& value);
+
+// Accepts a single path-free name: alphanumerics plus '.', '_', '-' and '+'.
+// Rejects separators, whitespace and metacharacters, and "." / "..".
+bool IsSafeUbootFilename(const std::string& value);
 
 static std::string AstraFlashImageTypeToString(FlashImageType type)
 {

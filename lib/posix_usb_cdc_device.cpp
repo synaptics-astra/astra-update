@@ -91,8 +91,6 @@ void PosixUSBCDCDevice::Close()
 {
     ASTRA_LOG;
 
-    m_writeCompleteCV.notify_all();
-
     {
         std::lock_guard<std::mutex> lock(m_closeMutex);
         if (!m_shutdown.exchange(true)) {
