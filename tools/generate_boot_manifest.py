@@ -81,7 +81,7 @@ def parse_sdk_config(file_path):
                 elif 'CONFIG_UBOOT_SUBOOT=y' in line:
                     uboot = 'suboot'
                 else:
-                    match = re.search(r'CONFIG_PREBOOT_MEMORY_SIZE="(\d+GB)"', line)
+                    match = re.search(r'CONFIG_PREBOOT_MEMORY_SIZE="(\d+(?:MB|GB))"', line)
                     if match:
                         memory_layout = match.group(1).lower()
                     match = re.search(r'CONFIG_PREBOOT_DDR_TYPE="([\d\w]+)"', line)
