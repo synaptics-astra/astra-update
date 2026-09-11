@@ -212,6 +212,9 @@ void AstraDeviceImpl::RunImageRequestLoop()
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && m_bootOnly) {
+                if (m_keepImageRequestLoopAfterBoot) {
+                    continue;
+                }
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Boot-only complete: shutting down image request thread" << endLog;
                 m_running.store(false);
                 SignalDeviceEvent();
@@ -283,6 +286,16 @@ void AstraDeviceImpl::RunImageRequestLoop()
 
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send image: " << image.GetName() << endLog;
+                if (m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+                    m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE)
+                {
+                    if (!ShouldSuppressImageStatus(image.GetName())) {
+                        ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL, 0, image.GetName(),
+                            "Failed to send image");
+                    }
+                    OnImageSent(image, false);
+                    continue;
+                }
                 if (m_status == ASTRA_DEVICE_STATUS_BOOT_START ||
                     m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS)
                 {
@@ -326,6 +339,9 @@ void AstraDeviceImpl::RunImageRequestLoop()
                     if (!waitForSizeRequest) {
                         // No size-request handshake; boot is complete once the final image is served.
                         m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
+                        if (m_keepImageRequestLoopAfterBoot) {
+                            ReportStatus(m_status, 100, "", "Success");
+                        }
                     }
                 }
             } else if (!m_finalUpdateImage.empty() &&
@@ -345,7 +361,14 @@ void AstraDeviceImpl::RunImageRequestLoop()
                        image.GetName() == m_sizeRequestImageFilename)
             {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Size-request image sent" << endLog;
-                m_status = ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
+                if (m_bootOnly) {
+                    m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
+                    if (m_keepImageRequestLoopAfterBoot) {
+                        ReportStatus(m_status, 100, "", "Success");
+                    }
+                } else {
+                    m_status = ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
+                }
                 waitForSizeRequest = false;
             }
 

@@ -27,6 +27,16 @@
 #include <indicators/dynamic_progress.hpp>
 #include <indicators/progress_bar.hpp>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include "astra_device_manager.hpp"
 
 namespace astra_cli {
@@ -81,9 +91,25 @@ inline void SignalHandler(int signal)
     }
 }
 
+#if defined(_WIN32)
+inline BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
+{
+    if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT) {
+        g_running.store(false);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+#endif
+
 inline void InstallSignalHandler()
 {
+#if defined(_WIN32)
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+#else
     std::signal(SIGINT, SignalHandler);
+#endif
 }
 
 // Wait briefly for the next response.  Returns nullopt on timeout or when

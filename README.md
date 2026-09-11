@@ -94,6 +94,7 @@ Astra Update also has additional command line parameters for providing details a
 * -M, --manifest arg - specify the path to a ``manifest.yaml`` file.
 * -u, --usb-debug - enable libusb debugging and output it to the console.
 * -S, --simple-progress - print progress messages instead of using indicator progress bars. Better for logging.
+* -k, --keep-image-request-loop - keep astra-boot serving image requests after boot completes. The default behavior is to shut down after boot.
 * -p, port - Filter devices based on their port. USB devices from other ports will be ignored. Ports provided in a comma
     separated string (ie, "1-2,3-9").
 

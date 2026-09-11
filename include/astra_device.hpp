@@ -49,7 +49,9 @@ class AstraDeviceImpl;
 class AstraDevice
 {
 public:
-    AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly, const std::string &bootCommand, AstraDeviceSeries deviceSeries = ASTRA_SERIES_SL16XX);
+    AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly,
+        const std::string &bootCommand, AstraDeviceSeries deviceSeries = ASTRA_SERIES_SL16XX,
+        bool keepImageRequestLoopAfterBoot = false);
     ~AstraDevice();
 
     void SetStatusCallback(std::function<void(AstraDeviceManagerResponse)> statusCallback);

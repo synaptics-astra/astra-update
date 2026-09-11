@@ -6,17 +6,20 @@
 #include "astra_log.hpp"
 
 AstraDevice::AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-    bool bootOnly, const std::string &bootCommand, AstraDeviceSeries deviceSeries)
+    bool bootOnly, const std::string &bootCommand, AstraDeviceSeries deviceSeries,
+    bool keepImageRequestLoopAfterBoot)
 {
     ASTRA_LOG;
 
     if (deviceSeries == ASTRA_SERIES_SL26XX) {
-        pImpl = CreateAstraDeviceSL26XXImpl(std::move(device), tempDir, bootOnly, bootCommand);
+        pImpl = CreateAstraDeviceSL26XXImpl(std::move(device), tempDir, bootOnly, bootCommand,
+            keepImageRequestLoopAfterBoot);
     } else {
         if (deviceSeries != ASTRA_SERIES_SL16XX) {
             log(ASTRA_LOG_LEVEL_WARNING) << "Unsupported device series selected, falling back to SL16XX implementation" << endLog;
         }
-        pImpl = CreateAstraDeviceSL16XXImpl(std::move(device), tempDir, bootOnly, bootCommand);
+        pImpl = CreateAstraDeviceSL16XXImpl(std::move(device), tempDir, bootOnly, bootCommand,
+            keepImageRequestLoopAfterBoot);
     }
 }
 

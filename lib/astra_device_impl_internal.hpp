@@ -26,8 +26,9 @@
 class AstraDeviceImpl {
 public:
     AstraDeviceImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-        bool bootOnly, const std::string &bootCommand)
-        : m_usbDevice{std::move(device)}, m_tempDir{tempDir}, m_bootOnly{bootOnly}, m_bootCommand{bootCommand}
+        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot)
+        : m_usbDevice{std::move(device)}, m_tempDir{tempDir}, m_bootOnly{bootOnly},
+          m_keepImageRequestLoopAfterBoot{keepImageRequestLoopAfterBoot}, m_bootCommand{bootCommand}
     {
         ASTRA_LOG;
     }
@@ -260,6 +261,7 @@ protected:
     std::string m_deviceName;
     std::string m_tempDir;
     bool m_bootOnly = false;
+    bool m_keepImageRequestLoopAfterBoot = false;
     std::string m_bootCommand;
     AstraDeviceBootStage m_bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
 
@@ -276,7 +278,9 @@ private:
 };
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device,
-    const std::string &tempDir, bool bootOnly, const std::string &bootCommand);
+    const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
+    bool keepImageRequestLoopAfterBoot);
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USBDevice> device,
-    const std::string &tempDir, bool bootOnly, const std::string &bootCommand);
+    const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
+    bool keepImageRequestLoopAfterBoot);

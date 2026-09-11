@@ -145,8 +145,9 @@ std::string DeviceModeToString(SL26XXDeviceMode mode)
 class AstraDeviceSL26XXImpl final : public AstraDeviceImpl {
 public:
     AstraDeviceSL26XXImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-        bool bootOnly, const std::string &bootCommand)
-        : AstraDeviceImpl(std::move(device), tempDir, bootOnly, bootCommand)
+        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot)
+        : AstraDeviceImpl(std::move(device), tempDir, bootOnly, bootCommand,
+            keepImageRequestLoopAfterBoot)
     {}
 
     ~AstraDeviceSL26XXImpl() override
@@ -392,7 +393,7 @@ public:
             m_deviceEventCV.wait(lock, [this] { return !m_running.load(); });
 
             if (m_bootOnly) {
-                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && !m_keepImageRequestLoopAfterBoot) {
                     ReportStatus(m_status, 100, "", "Success");
                 }
             } else {
@@ -1324,6 +1325,23 @@ private:
         return true;
     }
 
+    bool ArmRebindMode(const std::string &reason)
+    {
+        ASTRA_LOG;
+
+        if (m_updateSessionUuid.empty() || !m_registerFastbootSerial) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX fastboot: cannot arm rebind-mode, UUID is unavailable" << endLog;
+            return false;
+        }
+
+        if (!m_rebindArmed.exchange(true)) {
+            m_registerFastbootSerial(m_updateSessionUuid);
+            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: arming rebind-mode for "
+                << reason << endLog;
+        }
+        return true;
+    }
+
     // -----------------------------------------------------------------------
     // Virtual hook: WaitForImageRequest
     // Polls the SL26XX fastboot fb_command variable.  Blocks internally until
@@ -1350,10 +1368,18 @@ private:
             if (disconnected) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot device disconnected" << endLog;
                 m_fbExitPending.store(false);
-                if (m_rebindArmed.load() && WaitForRebind()) {
-                    // Rebind succeeded; reset the deadline and retry.
-                    deadline = std::chrono::steady_clock::now() + timeout;
-                    continue;
+                if (m_rebindArmed.load()) {
+                    if (WaitForRebind()) {
+                        // Rebind succeeded; reset the deadline and retry.
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
+                    if (m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+                        m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && m_running.load())
+                    {
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
                 }
                 m_running.store(false);
                 SignalDeviceEvent();
@@ -1370,9 +1396,13 @@ private:
             // the loop exit cleanly.
             if (m_fbExitPending.load()) {
                 if (m_rebindArmed.load()) {
+                    const bool keepBootLoopRunning =
+                        m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+                        m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
                     const bool updateDone =
                         (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) ||
-                        (m_bootOnly && m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE);
+                        (m_bootOnly && m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE &&
+                         !keepBootLoopRunning);
                     if (updateDone) {
                         // Final fb_exit — no more images to serve.
                         log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: update done, stopping after final fb_exit" << endLog;
@@ -1385,6 +1415,10 @@ private:
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: fb_exit pending, waiting for rebind" << endLog;
                     m_fbExitPending.store(false);
                     if (WaitForRebind()) {
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
+                    if (keepBootLoopRunning && m_running.load()) {
                         deadline = std::chrono::steady_clock::now() + timeout;
                         continue;
                     }
@@ -1412,6 +1446,25 @@ private:
                 if (m_rebindArmed.load()) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: GetVar failed (rebind-mode), waiting for reconnect" << endLog;
                     if (WaitForRebind()) {
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
+                    if (m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+                        m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && m_running.load())
+                    {
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
+                } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE &&
+                           m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+                           ArmRebindMode("post-boot reconnect"))
+                {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot disconnected after boot phase, waiting for reconnect" << endLog;
+                    if (WaitForRebind()) {
+                        deadline = std::chrono::steady_clock::now() + timeout;
+                        continue;
+                    }
+                    if (m_running.load()) {
                         deadline = std::chrono::steady_clock::now() + timeout;
                         continue;
                     }
@@ -1495,13 +1548,17 @@ private:
     // -----------------------------------------------------------------------
     void OnImageSent(const Image &image, bool success) override
     {
-        (void)image;
-
         std::lock_guard<std::mutex> lock(m_deviceMutex);
         if (!m_fastbootDevice) {
             return;
         }
         m_fastbootDevice->Oem("run:setenv fb_ret " + std::string(success ? "OKAY" : "FAIL"));
+        if (success && m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+            !m_finalBootImage.empty() &&
+            image.GetName().find(m_finalBootImage) != std::string::npos)
+        {
+            ArmRebindMode("post-boot image requests");
+        }
         // Send fb_exit without waiting for a response: U-Boot exits its staging
         // loop and resets the USB connection before it can send OKAY back.
         // Set m_fbExitPending so WaitForImageRequest does not attempt any further
@@ -1513,8 +1570,10 @@ private:
 };
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USBDevice> device,
-    const std::string &tempDir, bool bootOnly, const std::string &bootCommand)
+    const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
+    bool keepImageRequestLoopAfterBoot)
 {
-    return std::make_unique<AstraDeviceSL26XXImpl>(std::move(device), tempDir, bootOnly, bootCommand);
+    return std::make_unique<AstraDeviceSL26XXImpl>(std::move(device), tempDir, bootOnly,
+        bootCommand, keepImageRequestLoopAfterBoot);
 }
 

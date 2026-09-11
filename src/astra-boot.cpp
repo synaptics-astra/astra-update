@@ -33,6 +33,7 @@ int main(int argc, char* argv[])
         ("p,port", "Filter based on USB port", cxxopts::value<std::string>()->default_value(""))
         ("e,exit-on-error", "Exit if an error occurs when running in continuous mode", cxxopts::value<bool>()->default_value("false"))
         ("b,boot-stage", "Target boot stage: auto, bootloader, linux, m52bl, sysmgr", cxxopts::value<std::string>()->default_value("auto"))
+        ("k,keep-image-request-loop", "Keep serving image requests after boot completes", cxxopts::value<bool>()->default_value("false"))
         ("v,version", "Print version");
 
     options.parse_positional({"boot-image"});
@@ -75,6 +76,7 @@ int main(int argc, char* argv[])
     std::string bootCommand = result["boot-command"].as<std::string>();
     std::string filterPorts = result["port"].as<std::string>();
     std::string bootStageStr = result["boot-stage"].as<std::string>();
+    bool keepImageRequestLoopAfterBoot = result["keep-image-request-loop"].as<bool>();
 
     AstraDeviceBootStage bootStage = AstraDevice::BootStageFromString(bootStageStr);
 
@@ -97,7 +99,8 @@ int main(int argc, char* argv[])
 
     std::cout << "Astra Boot\n" << std::endl;
 
-    AstraDeviceManager deviceManager(astra_cli::ResponseCallback, continuous, logLevel, logFilePath, tempDir, filterPorts, usbDebug);
+    AstraDeviceManager deviceManager(astra_cli::ResponseCallback, continuous, logLevel,
+        logFilePath, tempDir, filterPorts, usbDebug, keepImageRequestLoopAfterBoot);
 
     try {
         deviceManager.Boot(bootImagePath, bootCommand, bootStage);

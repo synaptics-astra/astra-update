@@ -25,8 +25,9 @@
 class AstraDeviceSL16XXImpl final : public AstraDeviceImpl {
 public:
     AstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-        bool bootOnly, const std::string &bootCommand)
-        : AstraDeviceImpl(std::move(device), tempDir, bootOnly, bootCommand)
+        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot)
+        : AstraDeviceImpl(std::move(device), tempDir, bootOnly, bootCommand,
+            keepImageRequestLoopAfterBoot)
     {
         m_sizeRequestImageFilename = "07_IMAGE";
     }
@@ -145,7 +146,7 @@ public:
             log(ASTRA_LOG_LEVEL_DEBUG) << "Device event received: shutting down" << endLog;
 
             if (m_bootOnly) {
-                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
+                if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && !m_keepImageRequestLoopAfterBoot) {
                     // Device successfully reset after boot.
                     ReportStatus(m_status, 100, "", "Success");
                 }
@@ -529,7 +530,9 @@ private:
 };
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device,
-    const std::string &tempDir, bool bootOnly, const std::string &bootCommand)
+    const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
+    bool keepImageRequestLoopAfterBoot)
 {
-    return std::make_unique<AstraDeviceSL16XXImpl>(std::move(device), tempDir, bootOnly, bootCommand);
+    return std::make_unique<AstraDeviceSL16XXImpl>(std::move(device), tempDir, bootOnly,
+        bootCommand, keepImageRequestLoopAfterBoot);
 }

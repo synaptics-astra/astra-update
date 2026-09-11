@@ -33,9 +33,10 @@ public:
     AstraDeviceManagerImpl(std::function<void(AstraDeviceManagerResponse)> responseCallback,
         bool runContinuously,
         AstraLogLevel minLogLevel, const std::string &logPath,
-                const std::string &tempDir, const std::string &filterPorts, bool usbDebug)
+                const std::string &tempDir, const std::string &filterPorts, bool usbDebug,
+                bool keepImageRequestLoopAfterBoot)
         : m_responseCallback{responseCallback}, m_runContinuously{runContinuously}, m_filterPorts{filterPorts},
-                    m_usbDebug{usbDebug}
+                    m_usbDebug{usbDebug}, m_keepImageRequestLoopAfterBoot{keepImageRequestLoopAfterBoot}
     {
         if (tempDir.empty()) {
             m_tempDir = MakeTempDirectory();
@@ -278,6 +279,7 @@ private:
     std::atomic<bool> m_removeTempOnClose{false};
     bool m_runContinuously = false;
     bool m_usbDebug = false;
+    bool m_keepImageRequestLoopAfterBoot = false;
     AstraTransportType m_transportType = ASTRA_TRANSPORT_USB;
     AstraDeviceSeries m_deviceSeries = ASTRA_SERIES_SL16XX;
     AstraDeviceBootStage m_bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
@@ -712,7 +714,8 @@ private:
 
         // Normal path: new device arrival — create an impl and spawn a thread.
         std::shared_ptr<AstraDevice> astraDevice = std::make_shared<AstraDevice>(std::move(device), m_tempDir,
-            m_managerMode == ASTRA_DEVICE_MANAGER_MODE_BOOT, m_bootCommand, m_deviceSeries);
+            m_managerMode == ASTRA_DEVICE_MANAGER_MODE_BOOT, m_bootCommand, m_deviceSeries,
+            m_keepImageRequestLoopAfterBoot);
 
         // Inject registration callbacks so the impl can arm / disarm rebind-mode.
         auto weakDevice = std::weak_ptr<AstraDevice>(astraDevice);
@@ -755,9 +758,11 @@ private:
 AstraDeviceManager::AstraDeviceManager(std::function<void(AstraDeviceManagerResponse)> responseCallback,
     bool runContinuously,
     AstraLogLevel minLogLevel, const std::string &logPath,
-    const std::string &tempDir, const std::string &filterPorts, bool usbDebug)
+    const std::string &tempDir, const std::string &filterPorts, bool usbDebug,
+    bool keepImageRequestLoopAfterBoot)
     : pImpl{std::make_unique<AstraDeviceManagerImpl>(responseCallback,
-        runContinuously, minLogLevel, logPath, tempDir, filterPorts, usbDebug)}
+        runContinuously, minLogLevel, logPath, tempDir, filterPorts, usbDebug,
+        keepImageRequestLoopAfterBoot)}
 {}
 
 AstraDeviceManager::~AstraDeviceManager() = default;
