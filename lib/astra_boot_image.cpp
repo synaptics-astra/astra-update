@@ -183,15 +183,26 @@ bool AstraBootImage::Load()
     bool ret;
 
     if (std::filesystem::exists(m_path) && std::filesystem::is_directory(m_path)) {
-        for (const auto& entry : std::filesystem::directory_iterator(m_path)) {
+        const std::filesystem::path rootPath = std::filesystem::path(m_path);
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(rootPath)) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Found file: " << entry.path() << endLog;
-            if (entry.path().filename().string() == "manifest.yaml") {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+            std::error_code ec;
+            std::filesystem::path relativePath = std::filesystem::relative(entry.path(), rootPath, ec);
+            if (entry.path().filename().string() == "manifest.yaml" &&
+                !ec && relativePath.parent_path().empty())
+            {
                 ret = LoadManifest(entry.path().string());
                 if (!ret) {
                     return ret;
                 }
             } else {
-                m_images.push_back(Image(entry.path().string(), ASTRA_IMAGE_TYPE_BOOT));
+                const std::string imageName = ec
+                    ? entry.path().filename().generic_string()
+                    : relativePath.generic_string();
+                m_images.push_back(Image(entry.path().string(), ASTRA_IMAGE_TYPE_BOOT, imageName));
             }
         }
 
