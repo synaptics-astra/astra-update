@@ -206,9 +206,14 @@ void AstraDeviceImpl::RunImageRequestLoop()
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                // No more images will be requested, so the image-serving
+                // thread can stop, but the device may still be writing the
+                // final image to flash. Do not touch m_running / signal the
+                // device event here -- that would wake WaitForCompletion as
+                // if the device had disconnected. The real disconnect
+                // (reported via the USB event handler) is what must trigger
+                // the completion status.
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
-                m_running.store(false);
-                SignalDeviceEvent();
                 return;
             }
 
