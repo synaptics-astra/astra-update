@@ -16,7 +16,6 @@ int Image::Load()
     ASTRA_LOG;
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "Loading image: " << m_imagePath << endLog;
-    m_imageName = std::filesystem::path(m_imagePath).filename().string();
 
     if (std::filesystem::exists(m_imagePath) == false) {
         log(ASTRA_LOG_LEVEL_ERROR) << "Image file does not exist: " << m_imagePath << endLog;

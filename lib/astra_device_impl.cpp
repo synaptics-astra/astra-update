@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 #include "astra_boot_image.hpp"
 
@@ -212,6 +213,9 @@ void AstraDeviceImpl::RunImageRequestLoop()
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE && m_bootOnly) {
+                if (m_keepImageRequestLoopAfterBoot) {
+                    continue;
+                }
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Boot-only complete: shutting down image request thread" << endLog;
                 m_running.store(false);
                 SignalDeviceEvent();
@@ -228,21 +232,27 @@ void AstraDeviceImpl::RunImageRequestLoop()
             continue;
         }
 
-        // Strip a leading directory component (e.g. "boot/uEnv.txt" → "uEnv.txt").
+        std::replace(requestedImageName.begin(), requestedImageName.end(), '\\', '/');
+
+        std::vector<std::string> imageNameCandidates;
+        imageNameCandidates.push_back(requestedImageName);
         if (requestedImageName.find('/') != std::string::npos) {
             size_t pos = requestedImageName.find('/');
             std::string prefix = requestedImageName.substr(0, pos);
-            requestedImageName = requestedImageName.substr(pos + 1);
+            std::string withoutPrefix = requestedImageName.substr(pos + 1);
             log(ASTRA_LOG_LEVEL_DEBUG) << "Image name prefix: '" << prefix
-                << "', name: '" << requestedImageName << "'" << endLog;
+                << "', name: '" << withoutPrefix << "'" << endLog;
+            imageNameCandidates.push_back(withoutPrefix);
+            imageNameCandidates.push_back(std::filesystem::path(requestedImageName).filename().generic_string());
         }
 
         {
             std::lock_guard<std::mutex> lock(m_imageMutex);
 
             auto it = std::find_if(m_images.begin(), m_images.end(),
-                [&requestedImageName](const Image &img) {
-                    return img.GetName() == requestedImageName;
+                [&imageNameCandidates](const Image &img) {
+                    return std::find(imageNameCandidates.begin(), imageNameCandidates.end(),
+                        img.GetName()) != imageNameCandidates.end();
                 });
 
             if (it == m_images.end()) {
@@ -283,6 +293,16 @@ void AstraDeviceImpl::RunImageRequestLoop()
 
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send image: " << image.GetName() << endLog;
+                if (m_bootOnly && m_keepImageRequestLoopAfterBoot &&
+                    m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE)
+                {
+                    if (!ShouldSuppressImageStatus(image.GetName())) {
+                        ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL, 0, image.GetName(),
+                            "Failed to send image");
+                    }
+                    OnImageSent(image, false);
+                    continue;
+                }
                 if (m_status == ASTRA_DEVICE_STATUS_BOOT_START ||
                     m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS)
                 {
@@ -326,6 +346,9 @@ void AstraDeviceImpl::RunImageRequestLoop()
                     if (!waitForSizeRequest) {
                         // No size-request handshake; boot is complete once the final image is served.
                         m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
+                        if (m_keepImageRequestLoopAfterBoot) {
+                            ReportStatus(m_status, 100, "", "Success");
+                        }
                     }
                 }
             } else if (!m_finalUpdateImage.empty() &&
@@ -345,7 +368,14 @@ void AstraDeviceImpl::RunImageRequestLoop()
                        image.GetName() == m_sizeRequestImageFilename)
             {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Size-request image sent" << endLog;
-                m_status = ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
+                if (m_bootOnly) {
+                    m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
+                    if (m_keepImageRequestLoopAfterBoot) {
+                        ReportStatus(m_status, 100, "", "Success");
+                    }
+                } else {
+                    m_status = ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
+                }
                 waitForSizeRequest = false;
             }
 

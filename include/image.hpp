@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <filesystem>
+#include <utility>
 
 enum AstraSecureBootVersion {
     ASTRA_SECURE_BOOT_V2,
@@ -52,10 +53,13 @@ enum AstraTransportType {
 class Image
 {
 public:
-    Image(std::string imagePath, AstraImageType imageType) : m_imagePath{imagePath}, m_imageSize{0},
-        m_imageType{imageType}
+    Image(std::string imagePath, AstraImageType imageType, std::string imageName = "")
+        : m_imagePath{imagePath}, m_imageName{std::move(imageName)}, m_imageSize{0},
+          m_imageType{imageType}
     {
-        m_imageName = std::filesystem::path(m_imagePath).filename().string();
+        if (m_imageName.empty()) {
+            m_imageName = std::filesystem::path(m_imagePath).filename().string();
+        }
     }
 
     // Copy, move and destruction are all correct by default.  The open file
