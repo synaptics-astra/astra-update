@@ -11,7 +11,7 @@
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
-const std::string astraBootVersion = "2.0.3+astra-boot-image-request";
+const std::string astraBootVersion = "2.0.3+";
 
 int main(int argc, char* argv[])
 {
