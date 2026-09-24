@@ -145,9 +145,10 @@ std::string DeviceModeToString(SL26XXDeviceMode mode)
 class AstraDeviceSL26XXImpl final : public AstraDeviceImpl {
 public:
     AstraDeviceSL26XXImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot)
+        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot,
+        bool leaveFastbootIdle = false)
         : AstraDeviceImpl(std::move(device), tempDir, bootOnly, bootCommand,
-            keepImageRequestLoopAfterBoot)
+            keepImageRequestLoopAfterBoot, leaveFastbootIdle)
     {}
 
     ~AstraDeviceSL26XXImpl() override
@@ -335,6 +336,16 @@ public:
                 return -1;
             }
 
+            if (m_leaveFastbootIdle) {
+                // Leave the fastboot session untouched: no uEnv.txt staging,
+                // no fb_command polling, no fb_exit. This lets the device be
+                // driven manually (e.g. over a physical UART) instead of the
+                // tool immediately re-serving images and disconnecting it.
+                m_status = ASTRA_DEVICE_STATUS_BOOT_COMPLETE;
+                ReportStatus(m_status, 100, "", "Manual boot: fastboot device left idle for direct testing");
+                return 0;
+            }
+
             // If the device already carries our UUID as its serial# (i.e. it
             // has booted at least once from a uEnv.txt we wrote), arm rebind-mode
             // so the image-serving loop survives the fb_exit disconnects.
@@ -504,6 +515,79 @@ private:
     // Never held across WaitForRebind(): the Rebind() that would release the
     // wait needs this lock itself, so holding it there would deadlock.
     std::mutex m_deviceMutex;
+
+    // After the final fb_exit, U-Boot tears down the USB gadget immediately
+    // and only afterwards writes the staged image to eMMC, so the disconnect
+    // itself is not proof the flash write is finished. The Linux boot gadget
+    // (see NotifyFinalBootDetected()) is the real completion signal; this is
+    // just the fallback cap in case that never arrives (older image without
+    // the gadget, USB path mismatch, etc.) -- padded above the worst
+    // observed "do_img2sd" time cost of ~338s would be nice, but 5 minutes
+    // is the agreed fallback ceiling so a normal update isn't stuck waiting
+    // needlessly long when the real signal is missed.
+    static constexpr std::chrono::seconds kPostFlashGracePeriod{300};
+
+    // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
+    // arrives on this device's registered USB path.
+    std::atomic<bool> m_finalBootDetected{false};
+    std::mutex m_finalBootMutex;
+    std::condition_variable m_finalBootCV;
+
+    void NotifyFinalBootDetected() override
+    {
+        ASTRA_LOG;
+        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: final boot gadget detected" << endLog;
+        {
+            std::lock_guard<std::mutex> lock(m_finalBootMutex);
+            m_finalBootDetected.store(true);
+        }
+        m_finalBootCV.notify_all();
+    }
+
+    // Reports an interim "still writing to flash" status, then waits for
+    // either the real post-flash Linux boot gadget (NotifyFinalBootDetected)
+    // or kPostFlashGracePeriod to elapse, whichever comes first, before
+    // signalling completion.
+    void WaitForFlashWriteToFinish()
+    {
+        ASTRA_LOG;
+
+        ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_PROGRESS, 100, "",
+            "Image transfer complete; device is writing to flash, do not power off or disconnect");
+
+        std::string usbPath;
+        {
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
+            if (m_usbDevice) {
+                usbPath = m_usbDevice->GetUSBPath();
+            }
+        }
+        if (!usbPath.empty() && m_registerFinalBootPath) {
+            m_registerFinalBootPath(usbPath);
+        }
+
+        {
+            std::unique_lock<std::mutex> lock(m_finalBootMutex);
+            m_finalBootCV.wait_for(lock, kPostFlashGracePeriod, [this] {
+                return m_finalBootDetected.load() || m_shutdown.load();
+            });
+        }
+
+        if (!usbPath.empty() && m_unregisterFinalBootPath) {
+            m_unregisterFinalBootPath(usbPath);
+        }
+
+        if (m_finalBootDetected.load()) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: completing on final boot gadget detection" << endLog;
+        } else {
+            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: final boot gadget not detected within "
+                << kPostFlashGracePeriod.count() << "s; completing anyway" << endLog;
+        }
+
+        m_rebindArmed.store(false);
+        m_running.store(false);
+        SignalDeviceEvent();
+    }
 
     std::mutex m_rxMutex;
     std::condition_variable m_rxCV;
@@ -1231,6 +1315,7 @@ private:
     void WakeImageRequestThread() override
     {
         m_rebindCV.notify_all();
+        m_finalBootCV.notify_all();
         std::lock_guard<std::mutex> lock(m_rxMutex);
         m_rxCV.notify_all();
     }
@@ -1305,13 +1390,12 @@ private:
     // shut down (m_running cleared), or the timeout elapses.
     // Returns true if a rebind arrived; false on timeout or shutdown.
     // -----------------------------------------------------------------------
-    bool WaitForRebind()
+    bool WaitForRebind(std::chrono::milliseconds timeout = std::chrono::seconds(30))
     {
         ASTRA_LOG;
 
-        constexpr auto kTimeout = std::chrono::seconds(30);
         std::unique_lock<std::mutex> lock(m_rebindMutex);
-        bool ok = m_rebindCV.wait_for(lock, kTimeout,
+        bool ok = m_rebindCV.wait_for(lock, timeout,
             [this] { return m_rebindReady.load() || !m_running.load(); });
 
         if (!ok || !m_running.load()) {
@@ -1368,6 +1452,13 @@ private:
             if (disconnected) {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot device disconnected" << endLog;
                 m_fbExitPending.store(false);
+                if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE && m_rebindArmed.load()) {
+                    // Final disconnect: wait for the real post-flash
+                    // reconnect (can take minutes) rather than the short
+                    // mid-session rebind timeout below.
+                    WaitForFlashWriteToFinish();
+                    return false;
+                }
                 if (m_rebindArmed.load()) {
                     if (WaitForRebind()) {
                         // Rebind succeeded; reset the deadline and retry.
@@ -1380,6 +1471,10 @@ private:
                         deadline = std::chrono::steady_clock::now() + timeout;
                         continue;
                     }
+                }
+                if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                    WaitForFlashWriteToFinish();
+                    return false;
                 }
                 m_running.store(false);
                 SignalDeviceEvent();
@@ -1404,34 +1499,40 @@ private:
                         (m_bootOnly && m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE &&
                          !keepBootLoopRunning);
                     if (updateDone) {
-                        // Final fb_exit — no more images to serve.
-                        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: update done, stopping after final fb_exit" << endLog;
-                        m_rebindArmed.store(false);
+                        // Final fb_exit: wait for the device to actually
+                        // finish flashing and re-enter fastboot (or, for
+                        // older bootcmd/devices that just reset, wait out the
+                        // grace period and complete anyway). Keep rebind
+                        // armed until WaitForFlashWriteToFinish() is done
+                        // with it so the manager can route that reconnect to
+                        // Rebind().
+                        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: update done, waiting for device to finish flashing" << endLog;
                         m_fbExitPending.store(false);
+                        WaitForFlashWriteToFinish();
+                        return false;
+                    } else {
+                        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: fb_exit pending, waiting for rebind" << endLog;
+                        m_fbExitPending.store(false);
+                        if (WaitForRebind()) {
+                            deadline = std::chrono::steady_clock::now() + timeout;
+                            continue;
+                        }
+                        if (keepBootLoopRunning && m_running.load()) {
+                            deadline = std::chrono::steady_clock::now() + timeout;
+                            continue;
+                        }
                         m_running.store(false);
                         SignalDeviceEvent();
                         return false;
                     }
-                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: fb_exit pending, waiting for rebind" << endLog;
+                } else {
+                    // Non-rebind mode: fall through to the GetVar attempt below.
+                    // The transfer will fail immediately with NO_DEVICE once the
+                    // device disconnects after fb_exit, which sets m_running=false
+                    // and allows RunImageRequestLoop to exit cleanly without
+                    // reporting a spurious BOOT_FAIL.
                     m_fbExitPending.store(false);
-                    if (WaitForRebind()) {
-                        deadline = std::chrono::steady_clock::now() + timeout;
-                        continue;
-                    }
-                    if (keepBootLoopRunning && m_running.load()) {
-                        deadline = std::chrono::steady_clock::now() + timeout;
-                        continue;
-                    }
-                    m_running.store(false);
-                    SignalDeviceEvent();
-                    return false;
                 }
-                // Non-rebind mode: fall through to the GetVar attempt below.
-                // The transfer will fail immediately with NO_DEVICE once the
-                // device disconnects after fb_exit, which sets m_running=false
-                // and allows RunImageRequestLoop to exit cleanly without
-                // reporting a spurious BOOT_FAIL.
-                m_fbExitPending.store(false);
             }
 
             std::string fbCommand;
@@ -1443,6 +1544,11 @@ private:
 
             if (!gotCommand) {
                 // GetVar failure means the USB connection dropped.
+                if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE && m_rebindArmed.load()) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot disconnected after final fb_exit; update complete" << endLog;
+                    WaitForFlashWriteToFinish();
+                    return false;
+                }
                 if (m_rebindArmed.load()) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: GetVar failed (rebind-mode), waiting for reconnect" << endLog;
                     if (WaitForRebind()) {
@@ -1470,6 +1576,10 @@ private:
                     }
                 } else if (m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot disconnected after boot phase, waiting for reconnect" << endLog;
+                } else if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                    log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot disconnected after final fb_exit; update complete" << endLog;
+                    WaitForFlashWriteToFinish();
+                    return false;
                 } else {
                     log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX failed to get fb_command" << endLog;
                 }
@@ -1571,9 +1681,18 @@ private:
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USBDevice> device,
     const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
-    bool keepImageRequestLoopAfterBoot)
+    bool keepImageRequestLoopAfterBoot, bool leaveFastbootIdle)
 {
     return std::make_unique<AstraDeviceSL26XXImpl>(std::move(device), tempDir, bootOnly,
-        bootCommand, keepImageRequestLoopAfterBoot);
+        bootCommand, keepImageRequestLoopAfterBoot, leaveFastbootIdle);
+}
+
+std::string GetSL26XXFlashCompletionCommand()
+{
+    // Reverted: appending a fastboot-reentry command here (instead of a
+    // plain reset) caused a 100% reproducible on-device "img2sd"/"burn
+    // failed" error while writing the final image. Back to a plain reset
+    // until the root cause on the device side is understood.
+    return "; sleep 1; reset";
 }
 

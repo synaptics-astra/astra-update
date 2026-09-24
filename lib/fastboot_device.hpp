@@ -75,6 +75,14 @@ public:
      */
     bool OemNoWait(const std::string &command);
 
+    /**
+     * Send the standard fastboot "reboot" command without waiting for a
+     * response, since the device disconnects immediately upon accepting it
+     * (same rationale as OemNoWait).
+     * @return true if the command was sent successfully.
+     */
+    bool Reboot();
+
     /** @return true if the underlying USB device has disconnected. */
     bool IsDisconnected() const { return m_disconnected.load(); }
 

@@ -35,7 +35,8 @@ public:
         const std::string &tempDir = "",
         const std::string &filterPorts = "",
         bool usbDebug = false,
-        bool keepImageRequestLoopAfterBoot = false
+        bool keepImageRequestLoopAfterBoot = false,
+        bool leaveFastbootIdle = false
     );
     ~AstraDeviceManager();
 

@@ -51,7 +51,7 @@ class AstraDevice
 public:
     AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir, bool bootOnly,
         const std::string &bootCommand, AstraDeviceSeries deviceSeries = ASTRA_SERIES_SL16XX,
-        bool keepImageRequestLoopAfterBoot = false);
+        bool keepImageRequestLoopAfterBoot = false, bool leaveFastbootIdle = false);
     ~AstraDevice();
 
     void SetStatusCallback(std::function<void(AstraDeviceManagerResponse)> statusCallback);
@@ -77,15 +77,30 @@ public:
 
     /**
      * Install registration callbacks so the impl can register / unregister
-     * its UUID with the manager's fastboot-serial rebind registry.
+     * its UUID with the manager's fastboot-serial rebind registry, and its
+     * USB port path with the manager's final-boot-gadget detection registry.
      */
     void SetRegistrationCallbacks(
-        std::function<void(const std::string &)> registerFn,
-        std::function<void(const std::string &)> unregisterFn);
+        std::function<void(const std::string &)> registerFastbootSerialFn,
+        std::function<void(const std::string &)> unregisterFastbootSerialFn,
+        std::function<void(const std::string &)> registerFinalBootPathFn = nullptr,
+        std::function<void(const std::string &)> unregisterFinalBootPathFn = nullptr);
+
+    /**
+     * Called by the manager when the post-flash Linux boot gadget arrives on
+     * this device's registered USB path, so a waiting Update() can complete
+     * immediately instead of only on a timeout.
+     */
+    void NotifyFinalBootDetected();
 
     static const std::string AstraDeviceStatusToString(AstraDeviceStatus status);
     static const std::string AstraDeviceSeriesToString(AstraDeviceSeries series);
     static AstraDeviceBootStage BootStageFromString(const std::string &stage);
+
+    // The U-Boot command tail appended after a flash command completes
+    // (e.g. reset, or re-enter fastboot) is device-specific: each series
+    // knows what its own bootloader supports.
+    static std::string GetFlashCompletionCommand(AstraDeviceSeries series);
 
 private:
     std::unique_ptr<AstraDeviceImpl> pImpl;

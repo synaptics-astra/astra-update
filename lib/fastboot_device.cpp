@@ -352,3 +352,14 @@ bool FastBootDevice::OemNoWait(const std::string &command)
     }
     return ok;
 }
+
+bool FastBootDevice::Reboot()
+{
+    ASTRA_LOG;
+
+    const bool ok = SendCommand("reboot");
+    if (!ok) {
+        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot send failed" << endLog;
+    }
+    return ok;
+}

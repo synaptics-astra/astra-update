@@ -183,8 +183,4 @@ void SpiFlashImage::BuildFlashCommand()
         }
         log(ASTRA_LOG_LEVEL_DEBUG) << "Flash command: " << m_flashCommand << endLog;
     }
-
-    if (m_resetWhenComplete) {
-        m_flashCommand += m_resetCommand;
-    }
 }

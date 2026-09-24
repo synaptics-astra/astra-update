@@ -25,11 +25,15 @@
 class AstraDeviceSL16XXImpl final : public AstraDeviceImpl {
 public:
     AstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot)
+        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot,
+        bool leaveFastbootIdle = false)
         : AstraDeviceImpl(std::move(device), tempDir, bootOnly, bootCommand,
-            keepImageRequestLoopAfterBoot)
+            keepImageRequestLoopAfterBoot, leaveFastbootIdle)
     {
         m_sizeRequestImageFilename = "07_IMAGE";
+        // SL16XX always gets a real USB disconnect event, so wait for that
+        // rather than the image-request loop's idle timeout.
+        m_completeOnIdleTimeout = false;
     }
 
     ~AstraDeviceSL16XXImpl() override
@@ -123,7 +127,11 @@ public:
 
         if (!m_uEnvSupport && m_ubootConsole == ASTRA_UBOOT_CONSOLE_USB) {
             if (m_console != nullptr && m_console->WaitForPrompt()) {
-                SendToConsole(flashImage->GetFlashCommand() + "\n");
+                std::string flashCommand = flashImage->GetFlashCommand();
+                if (flashImage->GetResetWhenComplete()) {
+                    flashCommand += GetSL16XXFlashCompletionCommand();
+                }
+                SendToConsole(flashCommand + "\n");
             }
         }
 
@@ -531,8 +539,14 @@ private:
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device,
     const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
-    bool keepImageRequestLoopAfterBoot)
+    bool keepImageRequestLoopAfterBoot, bool leaveFastbootIdle)
 {
     return std::make_unique<AstraDeviceSL16XXImpl>(std::move(device), tempDir, bootOnly,
-        bootCommand, keepImageRequestLoopAfterBoot);
+        bootCommand, keepImageRequestLoopAfterBoot, leaveFastbootIdle);
+}
+
+std::string GetSL16XXFlashCompletionCommand()
+{
+    // Sleep before resetting to let console messages be sent to the host.
+    return "; sleep 1; reset";
 }
