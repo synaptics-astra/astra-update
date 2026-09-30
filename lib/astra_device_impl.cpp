@@ -206,9 +206,17 @@ void AstraDeviceImpl::RunImageRequestLoop()
             }
 
             if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                // No more images will be requested, so the image-serving
+                // thread can stop. If this series reliably reports a real
+                // USB disconnect (m_completeOnIdleTimeout == false), the
+                // device may still be writing the final image to flash, so
+                // leave m_running / the device event alone here and let the
+                // real disconnect handler trigger the completion status.
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
-                m_running.store(false);
-                SignalDeviceEvent();
+                if (m_completeOnIdleTimeout) {
+                    m_running.store(false);
+                    SignalDeviceEvent();
+                }
                 return;
             }
 

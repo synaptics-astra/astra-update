@@ -70,7 +70,6 @@ protected:
     std::string m_loadError;
     std::unique_ptr<std::vector<std::map<std::string, std::string>>> m_manifestMaps;
     bool m_resetWhenComplete = true;
-    const std::string m_resetCommand = "; sleep 1; reset"; // sleep before resetting to let console messages be sent to the host
 };
 
 struct ChipDetectionResult {

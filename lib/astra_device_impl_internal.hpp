@@ -26,9 +26,11 @@
 class AstraDeviceImpl {
 public:
     AstraDeviceImpl(std::unique_ptr<USBDevice> device, const std::string &tempDir,
-        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot)
+        bool bootOnly, const std::string &bootCommand, bool keepImageRequestLoopAfterBoot,
+        bool leaveFastbootIdle = false)
         : m_usbDevice{std::move(device)}, m_tempDir{tempDir}, m_bootOnly{bootOnly},
-          m_keepImageRequestLoopAfterBoot{keepImageRequestLoopAfterBoot}, m_bootCommand{bootCommand}
+          m_keepImageRequestLoopAfterBoot{keepImageRequestLoopAfterBoot}, m_bootCommand{bootCommand},
+          m_leaveFastbootIdle{leaveFastbootIdle}
     {
         ASTRA_LOG;
     }
@@ -61,15 +63,27 @@ public:
 
     /**
      * Install registration callbacks so the impl can register/unregister
-     * its UUID with the manager's fastboot-serial registry.
+     * its UUID with the manager's fastboot-serial registry, and its USB
+     * port path with the manager's final-boot-gadget detection registry.
      */
     void SetRegistrationCallbacks(
         std::function<void(const std::string &)> registerFn,
-        std::function<void(const std::string &)> unregisterFn)
+        std::function<void(const std::string &)> unregisterFn,
+        std::function<void(const std::string &)> registerFinalBootPathFn = nullptr,
+        std::function<void(const std::string &)> unregisterFinalBootPathFn = nullptr)
     {
         m_registerFastbootSerial   = std::move(registerFn);
         m_unregisterFastbootSerial = std::move(unregisterFn);
+        m_registerFinalBootPath    = std::move(registerFinalBootPathFn);
+        m_unregisterFinalBootPath  = std::move(unregisterFinalBootPathFn);
     }
+
+    /**
+     * Called by the manager when the post-flash Linux boot gadget arrives on
+     * this device's registered USB path. Default: no-op; SL26XX overrides it
+     * to wake WaitForFlashWriteToFinish() early.
+     */
+    virtual void NotifyFinalBootDetected() {}
 
     virtual std::string GetDeviceName()
     {
@@ -215,6 +229,15 @@ protected:
     // Set empty to disable size-request image logic (SL16XX sets "07_IMAGE").
     std::string m_sizeRequestImageFilename;
 
+    // When the image-serving loop times out waiting for a request after
+    // m_status reaches UPDATE_COMPLETE, whether to treat that idle timeout
+    // itself as the completion signal (m_running=false + SignalDeviceEvent).
+    // True (default) for series whose transport may never reliably deliver
+    // an async disconnect event (e.g. SL26XX bulk-only fastboot). SL16XX
+    // sets this false since it always gets a real USB disconnect event, so
+    // completion should wait for that instead of guessing on an idle timeout.
+    bool m_completeOnIdleTimeout = true;
+
     bool m_uEnvSupport = false;
     bool m_resetWhenComplete = false;
 
@@ -244,6 +267,11 @@ protected:
     std::function<void(const std::string &)> m_registerFastbootSerial;
     std::function<void(const std::string &)> m_unregisterFastbootSerial;
 
+    // Callbacks injected by the manager so the impl can register/unregister
+    // its USB port path in the final-boot-gadget detection registry.
+    std::function<void(const std::string &)> m_registerFinalBootPath;
+    std::function<void(const std::string &)> m_unregisterFinalBootPath;
+
 
     // -----------------------------------------------------------------------
     // Existing base state
@@ -262,6 +290,11 @@ protected:
     std::string m_tempDir;
     bool m_bootOnly = false;
     bool m_keepImageRequestLoopAfterBoot = false;
+    // When true, Boot() reports success and returns once the target stage is
+    // reached without starting the image-request loop, so a device left in
+    // fastboot (or any other stage) is not auto-served/fb_exit'd -- letting it
+    // be driven manually (e.g. over a physical UART) for one-off testing.
+    bool m_leaveFastbootIdle = false;
     std::string m_bootCommand;
     AstraDeviceBootStage m_bootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
 
@@ -279,8 +312,14 @@ private:
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL16XXImpl(std::unique_ptr<USBDevice> device,
     const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
-    bool keepImageRequestLoopAfterBoot);
+    bool keepImageRequestLoopAfterBoot, bool leaveFastbootIdle = false);
 
 std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USBDevice> device,
     const std::string &tempDir, bool bootOnly, const std::string &bootCommand,
-    bool keepImageRequestLoopAfterBoot);
+    bool keepImageRequestLoopAfterBoot, bool leaveFastbootIdle = false);
+
+// U-Boot command tail appended after a flash command, once flashing
+// completes, to hand control back to the host: each series' bootloader
+// supports a different mechanism (plain reset vs re-entering fastboot).
+std::string GetSL16XXFlashCompletionCommand();
+std::string GetSL26XXFlashCompletionCommand();

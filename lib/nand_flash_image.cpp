@@ -102,9 +102,5 @@ int NandFlashImage::Load()
     m_flashCommand = "usbload " + m_imageFile + " " + m_nandReadAddress
         + "; m2nand " + m_nandReadAddress;
 
-    if (m_resetWhenComplete) {
-        m_flashCommand += m_resetCommand;
-    }
-
     return ret;
 }

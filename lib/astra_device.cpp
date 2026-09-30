@@ -7,23 +7,31 @@
 
 AstraDevice::AstraDevice(std::unique_ptr<USBDevice> device, const std::string &tempDir,
     bool bootOnly, const std::string &bootCommand, AstraDeviceSeries deviceSeries,
-    bool keepImageRequestLoopAfterBoot)
+    bool keepImageRequestLoopAfterBoot, bool leaveFastbootIdle)
 {
     ASTRA_LOG;
 
     if (deviceSeries == ASTRA_SERIES_SL26XX) {
         pImpl = CreateAstraDeviceSL26XXImpl(std::move(device), tempDir, bootOnly, bootCommand,
-            keepImageRequestLoopAfterBoot);
+            keepImageRequestLoopAfterBoot, leaveFastbootIdle);
     } else {
         if (deviceSeries != ASTRA_SERIES_SL16XX) {
             log(ASTRA_LOG_LEVEL_WARNING) << "Unsupported device series selected, falling back to SL16XX implementation" << endLog;
         }
         pImpl = CreateAstraDeviceSL16XXImpl(std::move(device), tempDir, bootOnly, bootCommand,
-            keepImageRequestLoopAfterBoot);
+            keepImageRequestLoopAfterBoot, leaveFastbootIdle);
     }
 }
 
 AstraDevice::~AstraDevice() = default;
+
+std::string AstraDevice::GetFlashCompletionCommand(AstraDeviceSeries series)
+{
+    if (series == ASTRA_SERIES_SL26XX) {
+        return GetSL26XXFlashCompletionCommand();
+    }
+    return GetSL16XXFlashCompletionCommand();
+}
 
 void AstraDevice::SetStatusCallback(std::function<void(AstraDeviceManagerResponse)> statusCallback)
 {
@@ -81,10 +89,18 @@ void AstraDevice::Rebind(std::unique_ptr<USBDevice> device)
 }
 
 void AstraDevice::SetRegistrationCallbacks(
-    std::function<void(const std::string &)> registerFn,
-    std::function<void(const std::string &)> unregisterFn)
+    std::function<void(const std::string &)> registerFastbootSerialFn,
+    std::function<void(const std::string &)> unregisterFastbootSerialFn,
+    std::function<void(const std::string &)> registerFinalBootPathFn,
+    std::function<void(const std::string &)> unregisterFinalBootPathFn)
 {
-    pImpl->SetRegistrationCallbacks(std::move(registerFn), std::move(unregisterFn));
+    pImpl->SetRegistrationCallbacks(std::move(registerFastbootSerialFn), std::move(unregisterFastbootSerialFn),
+        std::move(registerFinalBootPathFn), std::move(unregisterFinalBootPathFn));
+}
+
+void AstraDevice::NotifyFinalBootDetected()
+{
+    pImpl->NotifyFinalBootDetected();
 }
 
 const std::string AstraDevice::AstraDeviceStatusToString(AstraDeviceStatus status)

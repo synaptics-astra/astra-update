@@ -12,7 +12,7 @@
 #include "flash_image.hpp"
 #include "astra_log.hpp"
 
-#define ASTRA_DEVICE_MANAGER_VERSION "2.0.3+"
+#define ASTRA_DEVICE_MANAGER_VERSION "2.0.4"
 
 enum AstraDeviceManagerStatus {
     ASTRA_DEVICE_MANAGER_STATUS_START,
@@ -35,7 +35,8 @@ public:
         const std::string &tempDir = "",
         const std::string &filterPorts = "",
         bool usbDebug = false,
-        bool keepImageRequestLoopAfterBoot = false
+        bool keepImageRequestLoopAfterBoot = false,
+        bool leaveFastbootIdle = false
     );
     ~AstraDeviceManager();
 
