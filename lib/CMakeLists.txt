@@ -10,6 +10,7 @@ ExternalProject_Add(libusb
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
                -DCMAKE_C_FLAGS=-D_GNU_SOURCE
+               -DHAVE_PIPE2:INTERNAL=
 )
 
 ExternalProject_Add(yaml-cpp

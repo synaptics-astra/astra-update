@@ -64,7 +64,33 @@ int LibUSBDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_t s
             m_config = nullptr;
         }
 
-        ret = libusb_get_active_config_descriptor(libusb_get_device(m_handle), &m_config);
+        libusb_device *device = libusb_get_device(m_handle);
+        ret = libusb_get_active_config_descriptor(device, &m_config);
+        if (ret == LIBUSB_ERROR_NOT_FOUND) {
+            // macOS may report no active configuration even when one is available.
+            // Select the first configuration before claiming the interface.
+            libusb_config_descriptor *firstConfig = nullptr;
+            const int descriptorRet = libusb_get_config_descriptor(device, 0, &firstConfig);
+            if (descriptorRet == LIBUSB_SUCCESS && firstConfig != nullptr) {
+                log(ASTRA_LOG_LEVEL_INFO) << "No active USB configuration; selecting configuration "
+                    << static_cast<int>(firstConfig->bConfigurationValue) << endLog;
+                ret = libusb_set_configuration(m_handle, firstConfig->bConfigurationValue);
+                if (ret == LIBUSB_SUCCESS) {
+                    m_config = firstConfig;
+                } else {
+                    log(ASTRA_LOG_LEVEL_WARNING) << "Failed to select USB configuration: "
+                        << libusb_error_name(ret) << endLog;
+                    libusb_free_config_descriptor(firstConfig);
+                }
+            } else {
+                log(ASTRA_LOG_LEVEL_WARNING) << "No active USB configuration and failed to read configuration 0: "
+                    << libusb_error_name(descriptorRet) << endLog;
+                if (firstConfig != nullptr) {
+                    libusb_free_config_descriptor(firstConfig);
+                }
+                ret = descriptorRet;
+            }
+        }
         if (ret < 0) {
             log(ASTRA_LOG_LEVEL_WARNING) << "Failed to get config descriptor (attempt "
                 << (attempt + 1) << "/" << maxRetries << "): " << libusb_error_name(ret) << endLog;
