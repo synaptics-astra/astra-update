@@ -357,7 +357,13 @@ public:
                 }
             }
 
-            m_deviceDir = m_tempDir;
+            std::string deviceDirName = m_deviceName;
+            deviceDirName.erase(std::remove(deviceDirName.begin(), deviceDirName.end(), ':'),
+                deviceDirName.end());
+            std::replace(deviceDirName.begin(), deviceDirName.end(), '.', '_');
+            m_deviceDir = m_tempDir + "/" + deviceDirName;
+            std::filesystem::create_directories(m_deviceDir);
+
             BuildBootImageList(bootImage, bootStage);
             m_status = ASTRA_DEVICE_STATUS_BOOT_START;
             StartImageRequestThread();
