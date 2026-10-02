@@ -63,27 +63,15 @@ public:
 
     /**
      * Install registration callbacks so the impl can register/unregister
-     * its UUID with the manager's fastboot-serial registry, and its USB
-     * port path with the manager's final-boot-gadget detection registry.
+     * its UUID with the manager's fastboot-serial registry.
      */
     void SetRegistrationCallbacks(
         std::function<void(const std::string &)> registerFn,
-        std::function<void(const std::string &)> unregisterFn,
-        std::function<void(const std::string &)> registerFinalBootPathFn = nullptr,
-        std::function<void(const std::string &)> unregisterFinalBootPathFn = nullptr)
+        std::function<void(const std::string &)> unregisterFn)
     {
         m_registerFastbootSerial   = std::move(registerFn);
         m_unregisterFastbootSerial = std::move(unregisterFn);
-        m_registerFinalBootPath    = std::move(registerFinalBootPathFn);
-        m_unregisterFinalBootPath  = std::move(unregisterFinalBootPathFn);
     }
-
-    /**
-     * Called by the manager when the post-flash Linux boot gadget arrives on
-     * this device's registered USB path. Default: no-op; SL26XX overrides it
-     * to wake WaitForFlashWriteToFinish() early.
-     */
-    virtual void NotifyFinalBootDetected() {}
 
     virtual std::string GetDeviceName()
     {
@@ -266,11 +254,6 @@ protected:
     // its UUID in the fastboot-serial rebind registry.
     std::function<void(const std::string &)> m_registerFastbootSerial;
     std::function<void(const std::string &)> m_unregisterFastbootSerial;
-
-    // Callbacks injected by the manager so the impl can register/unregister
-    // its USB port path in the final-boot-gadget detection registry.
-    std::function<void(const std::string &)> m_registerFinalBootPath;
-    std::function<void(const std::string &)> m_unregisterFinalBootPath;
 
 
     // -----------------------------------------------------------------------

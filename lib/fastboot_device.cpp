@@ -13,6 +13,13 @@
 
 #include "astra_log.hpp"
 
+#include <chrono>
+
+namespace {
+// Matches LIBUSB_ERROR_TIMEOUT; libusb.h is not included here because it drags in windows.h.
+constexpr int kReadBulkTimeout = -7;
+}
+
 FastBootDevice::FastBootDevice(USBDevice *usbDevice)
     : m_usbDevice(usbDevice)
 {}
@@ -353,13 +360,38 @@ bool FastBootDevice::OemNoWait(const std::string &command)
     return ok;
 }
 
-bool FastBootDevice::Reboot()
+bool FastBootDevice::Reboot(int timeoutMs)
 {
     ASTRA_LOG;
 
-    const bool ok = SendCommand("reboot");
-    if (!ok) {
-        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot send failed" << endLog;
+    // U-Boot only resets once the host has read the OKAY reply.
+    uint32_t unused = 0;
+    const std::string result = ExecuteCommand("reboot", unused, timeoutMs);
+    if (result != "OKAY") {
+        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot not acknowledged (result=" << result << ")" << endLog;
+        return false;
     }
-    return ok;
+    return true;
+}
+
+bool FastBootDevice::WaitForDisconnect(int timeoutMs)
+{
+    ASTRA_LOG;
+
+    // Read-only: writing to a device that is resetting can stall the OUT
+    // endpoint and block in clear-halt recovery.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (m_disconnected.load()) {
+            return true;
+        }
+        uint8_t buf[kRespBufferSize] = {};
+        int received = 0;
+        const int ret = m_usbDevice->ReadBulk(buf, sizeof(buf), &received, 250);
+        if (ret < 0 && ret != kReadBulkTimeout) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "FastBootDevice: device gone (ReadBulk ret=" << ret << ")" << endLog;
+            return true;
+        }
+    }
+    return false;
 }

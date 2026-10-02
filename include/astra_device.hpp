@@ -77,21 +77,11 @@ public:
 
     /**
      * Install registration callbacks so the impl can register / unregister
-     * its UUID with the manager's fastboot-serial rebind registry, and its
-     * USB port path with the manager's final-boot-gadget detection registry.
+     * its UUID with the manager's fastboot-serial rebind registry.
      */
     void SetRegistrationCallbacks(
         std::function<void(const std::string &)> registerFastbootSerialFn,
-        std::function<void(const std::string &)> unregisterFastbootSerialFn,
-        std::function<void(const std::string &)> registerFinalBootPathFn = nullptr,
-        std::function<void(const std::string &)> unregisterFinalBootPathFn = nullptr);
-
-    /**
-     * Called by the manager when the post-flash Linux boot gadget arrives on
-     * this device's registered USB path, so a waiting Update() can complete
-     * immediately instead of only on a timeout.
-     */
-    void NotifyFinalBootDetected();
+        std::function<void(const std::string &)> unregisterFastbootSerialFn);
 
     static const std::string AstraDeviceStatusToString(AstraDeviceStatus status);
     static const std::string AstraDeviceSeriesToString(AstraDeviceSeries series);

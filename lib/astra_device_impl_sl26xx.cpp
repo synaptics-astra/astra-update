@@ -516,30 +516,15 @@ private:
     // wait needs this lock itself, so holding it there would deadlock.
     std::mutex m_deviceMutex;
 
-    // Fallback cap on waiting for the device to finish flashing; padded above
-    // the worst observed "do_img2sd" time of ~338s.
+    // Max time for the device to finish flashing and re-enter fastboot; padded
+    // above the worst observed "do_img2sd" time of ~338s.
     static constexpr std::chrono::seconds kPostFlashGracePeriod{480};
 
-    // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
-    // arrives on this device's registered USB path (device reset instead of
-    // re-entering fastboot). Guarded by m_rebindMutex / m_rebindCV.
-    std::atomic<bool> m_finalBootDetected{false};
-
-    void NotifyFinalBootDetected() override
-    {
-        ASTRA_LOG;
-        log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: final boot gadget detected" << endLog;
-        {
-            std::lock_guard<std::mutex> lock(m_rebindMutex);
-            m_finalBootDetected.store(true);
-        }
-        m_rebindCV.notify_all();
-    }
+    static constexpr std::chrono::seconds kRebootDisconnectTimeout{10};
 
     // After the final fb_exit, U-Boot runs the flash command and then re-enters
     // fastboot (GetSL26XXFlashCompletionCommand()), so that reconnect means all
-    // on-device work is done; answer it with "reboot". The Linux boot gadget and
-    // kPostFlashGracePeriod are fallbacks for a bootcmd that resets instead.
+    // on-device work is done; answer it with "reboot".
     void WaitForFlashWriteToFinish()
     {
         ASTRA_LOG;
@@ -551,44 +536,42 @@ private:
             ArmRebindMode("post-flash fastboot re-entry");
         }
 
-        std::string usbPath;
-        {
-            std::lock_guard<std::mutex> lock(m_deviceMutex);
-            if (m_usbDevice) {
-                usbPath = m_usbDevice->GetUSBPath();
-            }
-        }
-        if (!usbPath.empty() && m_registerFinalBootPath) {
-            m_registerFinalBootPath(usbPath);
-        }
-
         bool reenteredFastboot = false;
         {
             std::unique_lock<std::mutex> lock(m_rebindMutex);
             m_rebindCV.wait_for(lock, kPostFlashGracePeriod, [this] {
-                return m_rebindReady.load() || m_finalBootDetected.load() ||
-                    m_shutdown.load() || !m_running.load();
+                return m_rebindReady.load() || m_shutdown.load() || !m_running.load();
             });
             reenteredFastboot = m_rebindReady.exchange(false);
-        }
-
-        if (!usbPath.empty() && m_unregisterFinalBootPath) {
-            m_unregisterFinalBootPath(usbPath);
         }
 
         m_rebindArmed.store(false);
 
         if (reenteredFastboot && !m_shutdown.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing, sending reboot" << endLog;
-            std::lock_guard<std::mutex> lock(m_deviceMutex);
-            if (!m_fastbootDevice || !m_fastbootDevice->Reboot()) {
-                log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: failed to send fastboot reboot" << endLog;
+            bool rebootAccepted = false;
+            bool disconnected = false;
+            {
+                std::lock_guard<std::mutex> lock(m_deviceMutex);
+                rebootAccepted = m_fastbootDevice && m_fastbootDevice->Reboot();
+                if (rebootAccepted) {
+                    disconnected = m_fastbootDevice->WaitForDisconnect(
+                        static_cast<int>(std::chrono::milliseconds(kRebootDisconnectTimeout).count()));
+                }
             }
-        } else if (m_finalBootDetected.load()) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: completing on final boot gadget detection" << endLog;
+            if (!rebootAccepted) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: device did not accept fastboot reboot" << endLog;
+            } else if (!disconnected) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: device did not disconnect within "
+                    << kRebootDisconnectTimeout.count() << "s of fastboot reboot" << endLog;
+            } else {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device disconnected after fastboot reboot" << endLog;
+            }
         } else if (!m_shutdown.load() && m_running.load()) {
-            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: device did not re-enter fastboot within "
-                << kPostFlashGracePeriod.count() << "s; completing anyway" << endLog;
+            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX: device did not re-enter fastboot within "
+                << kPostFlashGracePeriod.count() << "s after flashing" << endLog;
+            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
+            ReportStatus(m_status, 0, "", "timeout reached waiting for update completion");
         }
 
         m_running.store(false);

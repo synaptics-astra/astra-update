@@ -90,17 +90,9 @@ void AstraDevice::Rebind(std::unique_ptr<USBDevice> device)
 
 void AstraDevice::SetRegistrationCallbacks(
     std::function<void(const std::string &)> registerFastbootSerialFn,
-    std::function<void(const std::string &)> unregisterFastbootSerialFn,
-    std::function<void(const std::string &)> registerFinalBootPathFn,
-    std::function<void(const std::string &)> unregisterFinalBootPathFn)
+    std::function<void(const std::string &)> unregisterFastbootSerialFn)
 {
-    pImpl->SetRegistrationCallbacks(std::move(registerFastbootSerialFn), std::move(unregisterFastbootSerialFn),
-        std::move(registerFinalBootPathFn), std::move(unregisterFinalBootPathFn));
-}
-
-void AstraDevice::NotifyFinalBootDetected()
-{
-    pImpl->NotifyFinalBootDetected();
+    pImpl->SetRegistrationCallbacks(std::move(registerFastbootSerialFn), std::move(unregisterFastbootSerialFn));
 }
 
 const std::string AstraDevice::AstraDeviceStatusToString(AstraDeviceStatus status)
