@@ -516,44 +516,40 @@ private:
     // wait needs this lock itself, so holding it there would deadlock.
     std::mutex m_deviceMutex;
 
-    // After the final fb_exit, U-Boot tears down the USB gadget immediately
-    // and only afterwards writes the staged image to eMMC, so the disconnect
-    // itself is not proof the flash write is finished. The Linux boot gadget
-    // (see NotifyFinalBootDetected()) is the real completion signal; this is
-    // just the fallback cap in case that never arrives (older image without
-    // the gadget, USB path mismatch, etc.) -- padded above the worst
-    // observed "do_img2sd" time cost of ~338s would be nice, but 5 minutes
-    // is the agreed fallback ceiling so a normal update isn't stuck waiting
-    // needlessly long when the real signal is missed.
-    static constexpr std::chrono::seconds kPostFlashGracePeriod{300};
+    // Fallback cap on waiting for the device to finish flashing; padded above
+    // the worst observed "do_img2sd" time of ~338s.
+    static constexpr std::chrono::seconds kPostFlashGracePeriod{480};
 
     // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
-    // arrives on this device's registered USB path.
+    // arrives on this device's registered USB path (device reset instead of
+    // re-entering fastboot). Guarded by m_rebindMutex / m_rebindCV.
     std::atomic<bool> m_finalBootDetected{false};
-    std::mutex m_finalBootMutex;
-    std::condition_variable m_finalBootCV;
 
     void NotifyFinalBootDetected() override
     {
         ASTRA_LOG;
         log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: final boot gadget detected" << endLog;
         {
-            std::lock_guard<std::mutex> lock(m_finalBootMutex);
+            std::lock_guard<std::mutex> lock(m_rebindMutex);
             m_finalBootDetected.store(true);
         }
-        m_finalBootCV.notify_all();
+        m_rebindCV.notify_all();
     }
 
-    // Reports an interim "still writing to flash" status, then waits for
-    // either the real post-flash Linux boot gadget (NotifyFinalBootDetected)
-    // or kPostFlashGracePeriod to elapse, whichever comes first, before
-    // signalling completion.
+    // After the final fb_exit, U-Boot runs the flash command and then re-enters
+    // fastboot (GetSL26XXFlashCompletionCommand()), so that reconnect means all
+    // on-device work is done; answer it with "reboot". The Linux boot gadget and
+    // kPostFlashGracePeriod are fallbacks for a bootcmd that resets instead.
     void WaitForFlashWriteToFinish()
     {
         ASTRA_LOG;
 
         ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_PROGRESS, 100, "",
             "Image transfer complete; device is writing to flash, do not power off or disconnect");
+
+        if (!m_rebindArmed.load()) {
+            ArmRebindMode("post-flash fastboot re-entry");
+        }
 
         std::string usbPath;
         {
@@ -566,25 +562,35 @@ private:
             m_registerFinalBootPath(usbPath);
         }
 
+        bool reenteredFastboot = false;
         {
-            std::unique_lock<std::mutex> lock(m_finalBootMutex);
-            m_finalBootCV.wait_for(lock, kPostFlashGracePeriod, [this] {
-                return m_finalBootDetected.load() || m_shutdown.load();
+            std::unique_lock<std::mutex> lock(m_rebindMutex);
+            m_rebindCV.wait_for(lock, kPostFlashGracePeriod, [this] {
+                return m_rebindReady.load() || m_finalBootDetected.load() ||
+                    m_shutdown.load() || !m_running.load();
             });
+            reenteredFastboot = m_rebindReady.exchange(false);
         }
 
         if (!usbPath.empty() && m_unregisterFinalBootPath) {
             m_unregisterFinalBootPath(usbPath);
         }
 
-        if (m_finalBootDetected.load()) {
+        m_rebindArmed.store(false);
+
+        if (reenteredFastboot && !m_shutdown.load()) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing, sending reboot" << endLog;
+            std::lock_guard<std::mutex> lock(m_deviceMutex);
+            if (!m_fastbootDevice || !m_fastbootDevice->Reboot()) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: failed to send fastboot reboot" << endLog;
+            }
+        } else if (m_finalBootDetected.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: completing on final boot gadget detection" << endLog;
-        } else {
-            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: final boot gadget not detected within "
+        } else if (!m_shutdown.load() && m_running.load()) {
+            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: device did not re-enter fastboot within "
                 << kPostFlashGracePeriod.count() << "s; completing anyway" << endLog;
         }
 
-        m_rebindArmed.store(false);
         m_running.store(false);
         SignalDeviceEvent();
     }
@@ -1315,7 +1321,6 @@ private:
     void WakeImageRequestThread() override
     {
         m_rebindCV.notify_all();
-        m_finalBootCV.notify_all();
         std::lock_guard<std::mutex> lock(m_rxMutex);
         m_rxCV.notify_all();
     }
@@ -1689,10 +1694,8 @@ std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USB
 
 std::string GetSL26XXFlashCompletionCommand()
 {
-    // Reverted: appending a fastboot-reentry command here (instead of a
-    // plain reset) caused a 100% reproducible on-device "img2sd"/"burn
-    // failed" error while writing the final image. Back to a plain reset
-    // until the root cause on the device side is understood.
-    return "; sleep 1; reset";
+    // Re-enter fastboot once flashing finishes so the host knows the device is
+    // done; the host then sends "reboot" (see WaitForFlashWriteToFinish()).
+    return "; sleep 1; fastboot -l 0x10000000 -s 0x8000000 usb 0";
 }
 
