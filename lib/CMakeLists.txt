@@ -1,6 +1,11 @@
 include(ExternalProject)
 include(FetchContent)
 
+set(LIBUSB_PLATFORM_CMAKE_ARGS)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(APPEND LIBUSB_PLATFORM_CMAKE_ARGS "-DHAVE_PIPE2:INTERNAL=")
+endif()
+
 ExternalProject_Add(libusb
     GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
     GIT_TAG v1.0.26
@@ -10,7 +15,7 @@ ExternalProject_Add(libusb
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
                -DCMAKE_C_FLAGS=-D_GNU_SOURCE
-               -DHAVE_PIPE2:INTERNAL=
+               ${LIBUSB_PLATFORM_CMAKE_ARGS}
 )
 
 ExternalProject_Add(yaml-cpp
