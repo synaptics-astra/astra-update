@@ -46,9 +46,11 @@ def load_flash_image(
         image = FlashImage.flash_image_factory(str(img_path), cfg, mani_str)
         if image is None:
             raise RuntimeError(f"Failed to load flash image from {image_path}")
+        if image.load() != 0:
+            raise RuntimeError(image.get_load_error() or f"Failed to load flash image from {image_path}")
         return image
     except Exception as e:
-        raise RuntimeError(f"Error loading flash image: {e}")
+        raise RuntimeError(f"Error loading flash image: {e}") from e
 
 
 def load_spi_flash_image(

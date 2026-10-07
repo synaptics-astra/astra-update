@@ -6,7 +6,7 @@ Mirrors the functionality of the C++ astra-boot.cpp utility using the
 astra-update Python bindings.
 
 Usage:
-    python -m astra_update_boot <boot-image> [options]
+    python python/astra-boot.py <boot-image> [options]
 """
 
 import argparse
@@ -23,6 +23,7 @@ except ImportError:
     tqdm = None
 
 from astra_update import (
+    __version__,
     AstraDeviceManager,
     DeviceBootStage,
     DeviceStatus,
@@ -31,9 +32,6 @@ from astra_update import (
     AstraDevice,
 )
 from astra_update.response_handler import ResponseHandler, EventType
-
-
-__version__ = "2.0.0-dev"
 
 # Progress tracking
 @dataclass
@@ -61,6 +59,8 @@ class AstraBootTool:
         simple_progress: bool = False,
         temp_dir: str = "",
         filter_ports: str = "",
+        keep_image_request_loop_after_boot: bool = False,
+        leave_fastboot_idle: bool = False,
     ):
         """Initialize the boot tool."""
         self.boot_images_path = boot_images_path
@@ -70,7 +70,7 @@ class AstraBootTool:
         self.debug = debug
         self.continuous = continuous
         self.exit_on_error = exit_on_error
-        self.usb_debug = usb_debug or debug  # USB debug implies debug
+        self.usb_debug = usb_debug
         self.simple_progress = simple_progress or usb_debug  # USB debug forces simple progress
         self.temp_dir = temp_dir
         self.filter_ports = filter_ports
@@ -86,6 +86,8 @@ class AstraBootTool:
             temp_dir=temp_dir,
             filter_ports=filter_ports,
             usb_debug=self.usb_debug,
+            keep_image_request_loop_after_boot=keep_image_request_loop_after_boot,
+            leave_fastboot_idle=leave_fastboot_idle,
         )
         
         # Create response handler
@@ -182,6 +184,7 @@ class AstraBootTool:
             print(f"[ERROR] {message}", file=sys.stderr)
         elif status == DeviceManagerStatus.SHUTDOWN:
             print("[INFO] Device manager shutting down")
+            self.running = False
 
     def _handle_device_event(self, event):
         """Handle a device event."""
@@ -275,6 +278,7 @@ def main():
     
     parser.add_argument(
         "boot_image",
+        nargs="?",
         help="Path to boot images"
     )
     
@@ -346,6 +350,18 @@ def main():
     )
     
     parser.add_argument(
+        "-k", "--keep-image-request-loop",
+        action="store_true",
+        help="Keep serving image requests after boot completes"
+    )
+
+    parser.add_argument(
+        "--leave-fastboot-idle",
+        action="store_true",
+        help="Leave an SL26XX device idle in fastboot without serving image requests"
+    )
+
+    parser.add_argument(
         "-v", "--version",
         action="store_true",
         help="Print version"
@@ -358,6 +374,9 @@ def main():
         lib_version = AstraDeviceManager.get_version()
         print(f"astra-boot: v{__version__} (lib v{lib_version})")
         return 0
+
+    if args.boot_image is None:
+        parser.error("the following arguments are required: boot_image")
     
     # Parse boot stage
     stage_map = {
@@ -382,6 +401,8 @@ def main():
         simple_progress=args.simple_progress,
         temp_dir=args.temp_dir,
         filter_ports=args.port,
+        keep_image_request_loop_after_boot=args.keep_image_request_loop,
+        leave_fastboot_idle=args.leave_fastboot_idle,
     )
     
     return boot_tool.boot()

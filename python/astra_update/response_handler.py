@@ -221,7 +221,7 @@ class ResponseHandler:
         """Check if there are any pending responses."""
         return self.device_manager.has_responses()
 
-    def drainresponses(self) -> List[Event]:
+    def drain_responses(self) -> List[Event]:
         """
         Drain all pending responses and return them.
         
@@ -233,3 +233,5 @@ class ResponseHandler:
             events = self.poll_responses()
             all_events.extend(events)
         return all_events
+
+    drainresponses = drain_responses

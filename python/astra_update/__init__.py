@@ -4,8 +4,6 @@ Astra Update Python Bindings
 This package provides Python access to the astra-update library through pybind11.
 """
 
-__version__ = "2.0.0-dev"
-
 # Import core bindings from package-local native C++ extension module.
 from ._astra_update import (
     AstraDeviceManager,
@@ -23,8 +21,12 @@ from ._astra_update import (
     # Utilities
     AstraDevice,
     FlashImage,
+    FlashImageType,
+    UbootVersion,
     ResponseQueue,
 )
+
+__version__ = AstraDeviceManager.get_version()
 
 # Import Python-level utilities
 from .response_handler import ResponseHandler, EventType, Event
@@ -45,6 +47,8 @@ __all__ = [
     'DeviceStatus',
     'DeviceSeries',
     'DeviceManagerStatus',
+    'FlashImageType',
+    'UbootVersion',
     
     # Response utilities
     'ResponseHandler',

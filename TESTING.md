@@ -59,7 +59,7 @@ python -m pytest tests/ -v
 
 ```bash
 pip install pytest-cov
-python -m pytest tests/ --cov=src/astra_update --cov-report=html
+python -m pytest tests/ --cov=python/astra_update --cov-report=html
 # Open htmlcov/index.html for results
 ```
 
@@ -84,7 +84,7 @@ def test_import_main_module(self):
     from astra_update import AstraDeviceManager
     # Verify it's the real C++ module, not a stub
     version = AstraDeviceManager.get_version()
-    assert "2.0.0" in version
+    assert version == "2.0.4"
 ```
 
 #### 2. Response Handler Tests (`test_response_handler.py`)
@@ -175,7 +175,7 @@ def test_boot_device_real_hardware(self):
 Current test coverage targets:
 
 ```
-src/astra_update/
+python/astra_update/
   __init__.py           - 100% (import statements)
   response_handler.py   - 85%+ (main paths tested, error paths)
   images.py             - 90%+ (file handling, error cases)
@@ -188,7 +188,7 @@ lib/
 To check coverage:
 
 ```bash
-python -m pytest tests/ --cov=src/astra_update --cov-report=term-missing
+python -m pytest tests/ --cov=python/astra_update --cov-report=term-missing
 ```
 
 ## Adding New Tests
@@ -272,13 +272,13 @@ python -m pytest tests/ --benchmark-only
 
 **Solution**: Build the C++ module first
 ```bash
-cd build_py
-cmake --build . --config Release
+cmake -S . -B build_py -DCMAKE_BUILD_TYPE=Release -DASTRA_BUILD_PYTHON_BINDINGS=ON
+cmake --build build_py --config Release --target _astra_update
 ```
 
 Then ensure it's in Python path:
 ```bash
-export PYTHONPATH=/path/to/astra-update/src:$PYTHONPATH
+export PYTHONPATH=/path/to/astra-update/python:$PYTHONPATH
 python -m pytest tests/
 ```
 
@@ -315,7 +315,7 @@ Tests can be run in CI/CD pipelines:
 - name: Run Tests
   run: |
     pip install pytest pytest-cov
-    python -m pytest tests/ --cov=src/astra_update --cov-report=xml
+    python -m pytest tests/ --cov=python/astra_update --cov-report=xml
     
 - name: Upload Coverage
   uses: codecov/codecov-action@v3
