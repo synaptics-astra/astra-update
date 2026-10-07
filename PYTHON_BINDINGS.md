@@ -1,14 +1,15 @@
 # Python Bindings for Astra Update
 
-This directory contains the Python bindings and CLI tools for the astra-update library.
+The `python/` directory contains the Python package and CLI launcher for the astra-update library.
 
 ## Structure
 
-- `astra_update/` - Python package with:
+- `python/astra_update/` - Python package with:
   - `__init__.py` - Main package exports (C++ bindings + Python utilities)
   - `response_handler.py` - High-level response handling with events and callbacks
   - `images.py` - Convenience functions for loading flash/boot images
-- `astra_update_boot.py` - Python implementation of `astra-boot` CLI tool
+    - `boot.py` - Importable implementation of the boot CLI
+- `python/astra-boot.py` - Launcher for the Python `astra-boot` CLI tool
 - `tests/` - Test suite
 
 ## Building the Python Module
@@ -16,8 +17,8 @@ This directory contains the Python bindings and CLI tools for the astra-update l
 ### Prerequisites
 
 You must have the following installed:
-- Python 3.7+ (with development headers)
-- CMake 3.12+
+- Python 3.8+ (with development headers)
+- CMake 3.18+
 - C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS)
 - pip
 
@@ -32,17 +33,21 @@ You must have the following installed:
    ```bash
    mkdir -p build_py
    cd build_py
-   cmake -DCMAKE_BUILD_TYPE=Release ..
+    cmake -DCMAKE_BUILD_TYPE=Release -DASTRA_BUILD_PYTHON_BINDINGS=ON ..
    ```
 
 3. Build the Python module:
    ```bash
-   cmake --build . --config Release
+    cmake --build . --config Release --target _astra_update
    ```
 
-4. During the build, the extension module is copied into `src/astra_update/` as:
+4. During the build, the extension module is copied into `python/astra_update/` as:
     - Windows: `_astra_update*.pyd`
     - Linux/macOS: `_astra_update*.so`
+
+Python bindings are disabled by default for native-only builds. The extension
+uses pybind11 3.0.2 and must be built with the same Python interpreter used to
+run it. Pass `-DPython_EXECUTABLE=/path/to/python` to select an interpreter.
 
 ### Installation
 
@@ -50,7 +55,7 @@ You can either:
 
 1. **Direct usage from source tree**:
    ```bash
-    PYTHONPATH=/path/to/astra-update/src python -m astra_update_boot <images>
+    python python/astra-boot.py <images>
    ```
 
 2. **Install in Python environment (run from repo root)**:
@@ -62,10 +67,10 @@ You can either:
 
 ### Command-Line Tool
 
-The Python version of `astra-boot` provides identical functionality to the C++ version:
+The Python version of `astra-boot` uses the same library as the C++ version:
 
 ```bash
-python -m astra_update_boot <boot-images-path> [options]
+python python/astra-boot.py <boot-images-path> [options]
 ```
 
 **Options:**
@@ -80,12 +85,14 @@ python -m astra_update_boot <boot-images-path> [options]
 - `-p, --port` - Filter by USB port
 - `-e, --exit-on-error` - Exit on first error in continuous mode
 - `-b, --boot-stage` - Target boot stage: auto, bootloader, linux, m52bl, sysmgr
+- `-k, --keep-image-request-loop` - Keep serving image requests after boot completes
+- `--leave-fastboot-idle` - Leave an SL26XX device idle in fastboot
 - `-l, --log` - Log file path
 - `-M, --manifest` - Manifest file path
 
 **Example:**
 ```bash
-python -m astra_update_boot ~/astra-usbboot-images --boot-stage auto --continuous
+python python/astra-boot.py ~/astra-usbboot-images --boot-stage auto --continuous
 ```
 
 ### Python API
@@ -100,6 +107,8 @@ from astra_update.response_handler import ResponseHandler, EventType
 mgr = AstraDeviceManager(
     continuous=False,
     log_level=LogLevel.INFO,
+    keep_image_request_loop_after_boot=False,
+    leave_fastboot_idle=False,
 )
 
 # Create response handler for convenient event processing
@@ -137,6 +146,12 @@ flash_image = load_flash_image(
 # Update devices
 mgr.update(flash_image, "/path/to/boot/images")
 ```
+
+`load_flash_image()` calls the native `Load()` method and raises `RuntimeError`
+with the library's load diagnostic on failure. When using
+`FlashImage.flash_image_factory()` directly, call `load()` before `mgr.update()`.
+Flash images expose metadata getters, `get_load_error()`, and U-Boot version
+selection through `UbootVersion` and `set_uboot_version()`.
 
 #### Response Handling with Callbacks
 
@@ -309,7 +324,7 @@ python -m pytest tests/test_integration.py -v      # Full integration tests
 
 The Python module isn't built yet. Run build steps above, then ensure:
 ```bash
-export PYTHONPATH=/path/to/astra-update/src:$PYTHONPATH
+export PYTHONPATH=/path/to/astra-update/python:$PYTHONPATH
 ```
 
 ### Permission Denied on USB Device
@@ -328,7 +343,7 @@ sudo udevadm control --reload
 
 Ensure:
 - Python development headers: `python3-dev` (Linux) or Python installation with development headers
-- CMake 3.12+ with pybind11 support
+- CMake 3.18+ with pybind11 support
 - OpenSSL development libraries if needed
 
 Run with verbose output:
@@ -341,7 +356,7 @@ cmake --build . --config Release --verbose
 When modifying the Python bindings:
 
 1. Update C++ pybind11 module in `lib/astra_update_py.cpp`
-2. Update Python wrapper in `src/astra_update/` package files
+2. Update Python wrapper in `python/astra_update/` package files
 3. Add tests in `tests/`
 4. Ensure exact behavior match with C++ version
 5. Test on both Windows and Linux

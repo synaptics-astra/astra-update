@@ -6,8 +6,8 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add src to Python path for test imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add python to Python path for test imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 
 @pytest.fixture

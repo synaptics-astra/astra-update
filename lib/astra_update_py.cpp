@@ -108,6 +108,17 @@ PYBIND11_MODULE(_astra_update, m) {
         .value("SHUTDOWN", ASTRA_DEVICE_MANAGER_STATUS_SHUTDOWN)
         .export_values();
 
+    py::enum_<FlashImageType>(m, "FlashImageType")
+        .value("UNKNOWN", FLASH_IMAGE_TYPE_UNKNOWN)
+        .value("SPI", FLASH_IMAGE_TYPE_SPI)
+        .value("NAND", FLASH_IMAGE_TYPE_NAND)
+        .value("EMMC", FLASH_IMAGE_TYPE_EMMC);
+
+    py::enum_<AstraUbootVersion>(m, "UbootVersion")
+        .value("UNKNOWN", ASTRA_UBOOT_VERSION_UNKNOWN)
+        .value("V2019_10", ASTRA_UBOOT_VERSION_2019_10)
+        .value("V2025_01", ASTRA_UBOOT_VERSION_2025_01);
+
     // DeviceResponse struct
     py::class_<DeviceResponse>(m, "DeviceResponse")
         .def(py::init<>())
@@ -145,9 +156,12 @@ PYBIND11_MODULE(_astra_update, m) {
                          const std::string& logPath,
                          const std::string& tempDir,
                          const std::string& filterPorts,
-                         bool usbDebug) {
+                        bool usbDebug,
+                        bool keepImageRequestLoopAfterBoot,
+                        bool leaveFastbootIdle) {
                 return std::make_shared<AstraDeviceManager>(
-                    ResponseQueueCallback, continuous, logLevel, logPath, tempDir, filterPorts, usbDebug);
+                    ResponseQueueCallback, continuous, logLevel, logPath, tempDir, filterPorts,
+                    usbDebug, keepImageRequestLoopAfterBoot, leaveFastbootIdle);
              }),
             py::arg("continuous") = false,
             py::arg("log_level") = ASTRA_LOG_LEVEL_WARNING,
@@ -155,17 +169,22 @@ PYBIND11_MODULE(_astra_update, m) {
             py::arg("temp_dir") = "",
             py::arg("filter_ports") = "",
             py::arg("usb_debug") = false,
+            py::arg("keep_image_request_loop_after_boot") = false,
+            py::arg("leave_fastboot_idle") = false,
             "Initialize AstraDeviceManager with automatic response queue callback")
         .def("boot", &AstraDeviceManager::Boot,
             py::arg("boot_images_path"),
             py::arg("boot_command") = "",
             py::arg("boot_stage") = ASTRA_DEVICE_BOOT_STAGE_AUTO,
+            py::call_guard<py::gil_scoped_release>(),
             "Boot devices with the specified boot images")
         .def("update", &AstraDeviceManager::Update,
             py::arg("flash_image"),
             py::arg("boot_image_path"),
+            py::call_guard<py::gil_scoped_release>(),
             "Update devices with the specified flash image")
         .def("shutdown", &AstraDeviceManager::Shutdown,
+            py::call_guard<py::gil_scoped_release>(),
             "Shutdown the device manager")
         .def("get_log_file", &AstraDeviceManager::GetLogFile,
             "Get the path to the log file")
@@ -195,6 +214,17 @@ PYBIND11_MODULE(_astra_update, m) {
 
     // FlashImage static factory methods
     py::class_<FlashImage, std::shared_ptr<FlashImage>>(m, "FlashImage")
+        .def("load", &FlashImage::Load, py::call_guard<py::gil_scoped_release>())
+        .def("get_load_error", &FlashImage::GetLoadError)
+        .def("get_boot_image_id", &FlashImage::GetBootImageId)
+        .def("get_chip_name", &FlashImage::GetChipName)
+        .def("get_board_name", &FlashImage::GetBoardName)
+        .def("get_flash_command", &FlashImage::GetFlashCommand)
+        .def("get_final_image", &FlashImage::GetFinalImage)
+        .def("get_flash_image_type", &FlashImage::GetFlashImageType)
+        .def("get_reset_when_complete", &FlashImage::GetResetWhenComplete)
+        .def("get_uboot_version", &FlashImage::GetUbootVersion)
+        .def("set_uboot_version", &FlashImage::SetUbootVersion)
         .def_static("flash_image_factory",
             [](const std::string& imagePath,
                std::map<std::string, std::string> config,
