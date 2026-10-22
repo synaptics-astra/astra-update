@@ -239,10 +239,25 @@ class TestFlashImageLoading:
             images.load_flash_image(str(tmp_path))
 
     def test_native_image_api(self, tmp_path):
-        from astra_update import FlashImage, FlashImageType, UbootVersion
+        from astra_update import (
+            FlashImage,
+            FlashImageType,
+            ImageType,
+            MemoryDDRType,
+            MemoryLayout,
+            SecureBootVersion,
+            UbootVersion,
+        )
 
+        image_path = tmp_path / "firmware.bin"
+        image_path.write_bytes(b"firmware")
         (tmp_path / "manifest.yaml").write_text(
-            "chip: sl1680\nimage_type: spi\nimages:\n  missing.bin: {}\n",
+            "chip: sl1680\n"
+            "image_type: spi\n"
+            "secure_boot: gen2\n"
+            "memory_layout: 4gb\n"
+            "ddr_type: lpddr4x\n"
+            "images:\n  firmware.bin: {}\n",
             encoding="utf-8",
         )
         image = FlashImage.flash_image_factory(
@@ -250,10 +265,79 @@ class TestFlashImageLoading:
         )
         assert image.get_chip_name() == "sl1680"
         assert image.get_flash_image_type() == FlashImageType.SPI
+        assert image.get_secure_boot_version() == SecureBootVersion.GEN2
+        assert image.get_memory_layout() == MemoryLayout.GB_4
+        assert image.get_memory_ddr_type() == MemoryDDRType.LPDDR4X
+        assert image.get_reset_when_complete() is True
         image.set_uboot_version(UbootVersion.V2025_01)
         assert image.get_uboot_version() == UbootVersion.V2025_01
-        assert image.load() != 0
-        assert "SPI image file not found" in image.get_load_error()
+        assert image.load() == 0
+        assert image.get_load_error() == ""
+        assert image.get_final_image() == "firmware.bin"
+        flash_images = image.get_images()
+        assert len(flash_images) == 1
+        flash_image = flash_images[0]
+        assert flash_image.get_name() == "firmware.bin"
+        assert Path(flash_image.get_path()) == image_path
+        assert flash_image.get_image_type() == ImageType.UPDATE_SPI
+        assert flash_image.load() == 0
+        assert flash_image.get_size() == len(b"firmware")
+
+    def test_native_boot_image_getters(self, tmp_path):
+        from astra_update import (
+            AstraBootImage,
+            DeviceBootStage,
+            MemoryDDRType,
+            MemoryLayout,
+            SecureBootVersion,
+            TransportType,
+            UbootConsole,
+            UbootVariant,
+            UbootVersion,
+        )
+
+        (tmp_path / "manifest.yaml").write_text(
+            "id: test-boot\n"
+            "chip: sl1680\n"
+            "board: test-board\n"
+            "console: uart\n"
+            "uenv_support: true\n"
+            "vendor_id: '1234'\n"
+            "product_id: '5678'\n"
+            "secure_boot: gen2\n"
+            "memory_layout: 4gb\n"
+            "ddr_type: ddr4\n"
+            "uboot: uboot\n"
+            "uboot_version: '2025.01'\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "bl.bin").write_bytes(b"boot")
+
+        boot_image = AstraBootImage(str(tmp_path))
+        assert boot_image.load()
+        assert boot_image.get_vendor_id() == 0x1234
+        assert boot_image.get_product_id() == 0x5678
+        assert boot_image.get_vendor_product_id_pairs() == [(0x1234, 0x5678)]
+        assert boot_image.get_sysmgr_vendor_id() == 0
+        assert boot_image.get_sysmgr_product_id() == 0
+        assert boot_image.get_fastboot_vendor_id() == 0
+        assert boot_image.get_fastboot_product_id() == 0
+        assert boot_image.get_chip_name() == "sl1680"
+        assert boot_image.get_board_name() == "test-board"
+        assert boot_image.get_id() == "test-boot"
+        assert boot_image.get_uenv_support() is True
+        assert boot_image.get_nand_support() is False
+        assert boot_image.get_secure_boot_version() == SecureBootVersion.GEN2
+        assert boot_image.get_uboot_console() == UbootConsole.UART
+        assert boot_image.get_memory_layout() == MemoryLayout.GB_4
+        assert boot_image.get_memory_ddr_type() == MemoryDDRType.DDR4
+        assert boot_image.get_transport_type() == TransportType.USB
+        assert boot_image.get_uboot_variant() == UbootVariant.UBOOT
+        assert boot_image.get_uboot_version() == UbootVersion.V2025_01
+        assert boot_image.get_final_boot_image() == "minildr.img"
+        assert boot_image.is_linux_boot() is False
+        assert boot_image.get_default_boot_stage() == DeviceBootStage.AUTO
+        assert len(boot_image.get_images()) == 1
 
 
 class TestStaticMethods:

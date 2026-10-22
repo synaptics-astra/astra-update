@@ -7,6 +7,7 @@ This package provides Python access to the astra-update library through pybind11
 # Import core bindings from package-local native C++ extension module.
 from ._astra_update import (
     AstraDeviceManager,
+    AstraBootImage,
     DeviceManagerResponse,
     DeviceResponse,
     ManagerResponse,
@@ -21,7 +22,15 @@ from ._astra_update import (
     # Utilities
     AstraDevice,
     FlashImage,
+    Image,
     FlashImageType,
+    ImageType,
+    SecureBootVersion,
+    MemoryLayout,
+    MemoryDDRType,
+    TransportType,
+    UbootConsole,
+    UbootVariant,
     UbootVersion,
     ResponseQueue,
 )
@@ -34,11 +43,13 @@ from .response_handler import ResponseHandler, EventType, Event
 __all__ = [
     # Classes
     'AstraDeviceManager',
+    'AstraBootImage',
     'DeviceManagerResponse',
     'DeviceResponse',
     'ManagerResponse',
     'AstraDevice',
     'FlashImage',
+    'Image',
     'ResponseQueue',
     
     # Enums
@@ -48,6 +59,13 @@ __all__ = [
     'DeviceSeries',
     'DeviceManagerStatus',
     'FlashImageType',
+    'ImageType',
+    'SecureBootVersion',
+    'MemoryLayout',
+    'MemoryDDRType',
+    'TransportType',
+    'UbootConsole',
+    'UbootVariant',
     'UbootVersion',
     
     # Response utilities

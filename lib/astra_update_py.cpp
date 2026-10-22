@@ -11,6 +11,7 @@
 #include "astra_device_manager.hpp"
 #include "astra_device.hpp"
 #include "flash_image.hpp"
+#include "astra_boot_image.hpp"
 
 namespace py = pybind11;
 
@@ -119,6 +120,51 @@ PYBIND11_MODULE(_astra_update, m) {
         .value("V2019_10", ASTRA_UBOOT_VERSION_2019_10)
         .value("V2025_01", ASTRA_UBOOT_VERSION_2025_01);
 
+    py::enum_<AstraSecureBootVersion>(m, "SecureBootVersion")
+        .value("GEN2", ASTRA_SECURE_BOOT_V2)
+        .value("GENX", ASTRA_SECURE_BOOT_V3);
+
+    py::enum_<AstraMemoryLayout>(m, "MemoryLayout")
+        .value("GB_1", ASTRA_MEMORY_LAYOUT_1GB)
+        .value("GB_2", ASTRA_MEMORY_LAYOUT_2GB)
+        .value("GB_3", ASTRA_MEMORY_LAYOUT_3GB)
+        .value("GB_4", ASTRA_MEMORY_LAYOUT_4GB)
+        .value("MB_512", ASTRA_MEMORY_LAYOUT_512MB);
+
+    py::enum_<AstraMemoryDDRType>(m, "MemoryDDRType")
+        .value("NOT_SPECIFIED", ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED)
+        .value("DDR3", ASTRA_MEMORY_DDR_TYPE_DDR3)
+        .value("DDR4", ASTRA_MEMORY_DDR_TYPE_DDR4)
+        .value("LPDDR4", ASTRA_MEMORY_DDR_TYPE_LPDDR4)
+        .value("LPDDR4X", ASTRA_MEMORY_DDR_TYPE_LPDDR4X)
+        .value("DDR4X16", ASTRA_MEMORY_DDR_TYPE_DDR4X16);
+
+    py::enum_<AstraImageType>(m, "ImageType")
+        .value("BOOT", ASTRA_IMAGE_TYPE_BOOT)
+        .value("UPDATE_EMMC", ASTRA_IMAGE_TYPE_UPDATE_EMMC)
+        .value("UPDATE_SPI", ASTRA_IMAGE_TYPE_UPDATE_SPI)
+        .value("UPDATE_NAND", ASTRA_IMAGE_TYPE_UPDATE_NAND);
+
+    py::enum_<AstraTransportType>(m, "TransportType")
+        .value("USB", ASTRA_TRANSPORT_USB)
+        .value("USB_CDC", ASTRA_TRANSPORT_USB_CDC);
+
+    py::enum_<AstraUbootConsole>(m, "UbootConsole")
+        .value("UART", ASTRA_UBOOT_CONSOLE_UART)
+        .value("USB", ASTRA_UBOOT_CONSOLE_USB);
+
+    py::enum_<AstraUbootVariant>(m, "UbootVariant")
+        .value("UNKNOWN", ASTRA_UBOOT_VARIANT_UNKNOWN)
+        .value("UBOOT", ASTRA_UBOOT_VARIANT_UBOOT)
+        .value("SYNAPTICS", ASTRA_UBOOT_VARIANT_SYNAPTICS);
+
+    py::class_<Image>(m, "Image")
+        .def("load", &Image::Load, py::call_guard<py::gil_scoped_release>())
+        .def("get_name", &Image::GetName)
+        .def("get_path", &Image::GetPath)
+        .def("get_size", &Image::GetSize)
+        .def("get_image_type", &Image::GetImageType);
+
     // DeviceResponse struct
     py::class_<DeviceResponse>(m, "DeviceResponse")
         .def(py::init<>())
@@ -221,9 +267,13 @@ PYBIND11_MODULE(_astra_update, m) {
         .def("get_board_name", &FlashImage::GetBoardName)
         .def("get_flash_command", &FlashImage::GetFlashCommand)
         .def("get_final_image", &FlashImage::GetFinalImage)
+        .def("get_secure_boot_version", &FlashImage::GetSecureBootVersion)
+        .def("get_memory_layout", &FlashImage::GetMemoryLayout)
+        .def("get_memory_ddr_type", &FlashImage::GetMemoryDDRType)
         .def("get_flash_image_type", &FlashImage::GetFlashImageType)
         .def("get_reset_when_complete", &FlashImage::GetResetWhenComplete)
         .def("get_uboot_version", &FlashImage::GetUbootVersion)
+        .def("get_images", &FlashImage::GetImages)
         .def("set_uboot_version", &FlashImage::SetUbootVersion)
         .def_static("flash_image_factory",
             [](const std::string& imagePath,
@@ -237,6 +287,33 @@ PYBIND11_MODULE(_astra_update, m) {
             "Factory method to create a FlashImage from file.\n"
             "config is a dict of key/value overrides, e.g.:\n"
             "  board, chip, image_type, boot_image, secure_boot, memory_layout, ddr_type, reset");
+
+    py::class_<AstraBootImage, std::shared_ptr<AstraBootImage>>(m, "AstraBootImage")
+        .def(py::init<std::string>(), py::arg("path") = "")
+        .def("load", &AstraBootImage::Load, py::call_guard<py::gil_scoped_release>())
+        .def("get_vendor_id", &AstraBootImage::GetVendorId)
+        .def("get_product_id", &AstraBootImage::GetProductId)
+        .def("get_vendor_product_id_pairs", &AstraBootImage::GetVendorProductIdPairs)
+        .def("get_sysmgr_vendor_id", &AstraBootImage::GetSysMgrVendorId)
+        .def("get_sysmgr_product_id", &AstraBootImage::GetSysMgrProductId)
+        .def("get_fastboot_vendor_id", &AstraBootImage::GetFastbootVendorId)
+        .def("get_fastboot_product_id", &AstraBootImage::GetFastbootProductId)
+        .def("get_chip_name", &AstraBootImage::GetChipName)
+        .def("get_board_name", &AstraBootImage::GetBoardName)
+        .def("get_id", &AstraBootImage::GetID)
+        .def("get_uenv_support", &AstraBootImage::GetUEnvSupport)
+        .def("get_nand_support", &AstraBootImage::GetNandSupport)
+        .def("get_secure_boot_version", &AstraBootImage::GetSecureBootVersion)
+        .def("get_uboot_console", &AstraBootImage::GetUbootConsole)
+        .def("get_memory_layout", &AstraBootImage::GetMemoryLayout)
+        .def("get_memory_ddr_type", &AstraBootImage::GetMemoryDDRType)
+        .def("get_transport_type", &AstraBootImage::GetTransportType)
+        .def("get_images", &AstraBootImage::GetImages)
+        .def("get_uboot_variant", &AstraBootImage::GetUbootVariant)
+        .def("get_uboot_version", &AstraBootImage::GetUbootVersion)
+        .def("get_final_boot_image", &AstraBootImage::GetFinalBootImage)
+        .def("is_linux_boot", &AstraBootImage::IsLinuxBoot)
+        .def("get_default_boot_stage", &AstraBootImage::GetDefaultBootStage);
 
     // ResponseQueue access for Python
     py::class_<ResponseQueue>(m, "ResponseQueue")
