@@ -230,6 +230,31 @@ AstraDeviceManager(
 - `response_queue_size() -> int` - Get queue size
 - `get_version()` - Get library version (static)
 
+#### `FlashImage`
+
+Create flash images with `FlashImage.flash_image_factory(...)`. Call `load()`
+before using `get_images()` or updating a device. Metadata getters include
+`get_load_error()`, `get_boot_image_id()`, `get_chip_name()`,
+`get_board_name()`, `get_flash_command()`, `get_final_image()`,
+`get_secure_boot_version()`, `get_memory_layout()`, `get_memory_ddr_type()`,
+`get_uboot_version()`, `get_flash_image_type()`, and
+`get_reset_when_complete()`. `get_images()` returns `Image` objects.
+`set_uboot_version()` updates the selected U-Boot version.
+
+#### `AstraBootImage`
+
+Construct with a boot-image directory path and call `load()` before reading
+metadata. Its getters expose vendor/product IDs and ID pairs, chip and board,
+manifest ID, uEnv/NAND support, secure-boot version, U-Boot console/variant/
+version, memory layout and DDR type, transport type, final boot image, Linux
+boot status, default boot stage, and contained `Image` objects.
+
+#### `Image`
+
+Images returned from `FlashImage.get_images()` and
+`AstraBootImage.get_images()` provide `get_name()`, `get_path()`, `get_size()`,
+and `get_image_type()`. Call `load()` before relying on the size.
+
 #### `ResponseHandler`
 
 High-level response processing with event callbacks.
@@ -251,6 +276,15 @@ High-level response processing with event callbacks.
 - `DeviceStatus` - ADDED, OPENED, CLOSED, BOOT_START, BOOT_PROGRESS, BOOT_COMPLETE, BOOT_FAIL, UPDATE_START, UPDATE_PROGRESS, UPDATE_COMPLETE, UPDATE_FAIL, IMAGE_SEND_START, IMAGE_SEND_PROGRESS, IMAGE_SEND_COMPLETE, IMAGE_SEND_FAIL
 - `DeviceManagerStatus` - START, INFO, FAILURE, SHUTDOWN
 - `DeviceSeries` - SL16XX, SL26XX, SR1XX
+- `FlashImageType` - UNKNOWN, SPI, NAND, EMMC
+- `ImageType` - BOOT, UPDATE_EMMC, UPDATE_SPI, UPDATE_NAND
+- `SecureBootVersion` - GEN2, GENX
+- `MemoryLayout` - GB_1, GB_2, GB_3, GB_4, MB_512
+- `MemoryDDRType` - NOT_SPECIFIED, DDR3, DDR4, LPDDR4, LPDDR4X, DDR4X16
+- `TransportType` - USB, USB_CDC
+- `UbootConsole` - UART, USB
+- `UbootVariant` - UNKNOWN, UBOOT, SYNAPTICS
+- `UbootVersion` - UNKNOWN, V2019_10, V2025_01
 
 ### Data Classes
 
