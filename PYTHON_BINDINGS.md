@@ -29,16 +29,14 @@ You must have the following installed:
    cd /path/to/astra-update
    ```
 
-2. Create and configure the build directory:
+2. Configure the build directory from the project root:
    ```bash
-   mkdir -p build_py
-   cd build_py
-    cmake -DCMAKE_BUILD_TYPE=Release -DASTRA_BUILD_PYTHON_BINDINGS=ON ..
+   cmake -S . -B build_py -DCMAKE_BUILD_TYPE=Release -DASTRA_BUILD_PYTHON_BINDINGS=ON
    ```
 
 3. Build the Python module:
    ```bash
-    cmake --build . --config Release --target _astra_update
+   cmake --build build_py --config Release --target _astra_update
    ```
 
 4. During the build, the extension module is copied into `python/astra_update/` as:
@@ -51,17 +49,24 @@ run it. Pass `-DPython_EXECUTABLE=/path/to/python` to select an interpreter.
 
 ### Installation
 
-You can either:
+Run these commands from the repository root, using the same Python environment
+for both the CMake build and pip:
 
-1. **Direct usage from source tree**:
-   ```bash
-    python python/astra-boot.py <images>
-   ```
+```bash
+python -m pip install -e .
+```
 
-2. **Install in Python environment (run from repo root)**:
-   ```bash
-   python -m pip install .
-   ```
+The root `pyproject.toml` configures setuptools to install the package from
+`python/astra_update/` in editable mode. Build the native extension first using
+the steps above: `pip install -e .` installs the Python package and CLI entry
+point, but does not compile the C++ extension.
+
+After installation, Python code can import `astra_update`, and the CLI is
+available as `astra-boot-py`. To run the script directly without installing:
+
+```bash
+python python/astra-boot.py <images>
+```
 
 ## Usage
 
