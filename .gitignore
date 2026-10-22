@@ -9,3 +9,10 @@ Makefile
 # Local editor and OS metadata
 .DS_Store
 .history/
+
+__pycache__/
+.pytest_cache/
+*.egg-info/
+/python/astra_update/_astra_update*.pyd
+/python/astra_update/_astra_update*.so
+/python/astra_update/_astra_update*.dylib
