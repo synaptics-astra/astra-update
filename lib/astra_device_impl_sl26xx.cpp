@@ -1396,7 +1396,8 @@ private:
     // shut down (m_running cleared), or the timeout elapses.
     // Returns true if a rebind arrived; false on timeout or shutdown.
     // -----------------------------------------------------------------------
-    bool WaitForRebind(std::chrono::milliseconds timeout = std::chrono::seconds(30))
+    // Partition erase before the first rootfs chunk was seen to take just over 30s.
+    bool WaitForRebind(std::chrono::milliseconds timeout = std::chrono::seconds(120))
     {
         ASTRA_LOG;
 
