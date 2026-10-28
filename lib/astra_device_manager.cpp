@@ -12,6 +12,8 @@
 #include <cctype>
 #include <filesystem>
 #include <condition_variable>
+#include <chrono>
+#include <deque>
 #include "astra_device.hpp"
 #include "astra_device_manager.hpp"
 #include "boot_image_collection.hpp"
@@ -181,7 +183,11 @@ public:
 
         // Stop DeviceAddedCallback from spawning any further device threads
         // before we start tearing down the state those threads use.
-        m_shuttingDown.store(true);
+        {
+            std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
+            m_shuttingDown.store(true);
+        }
+        m_fastbootArrivalCV.notify_all();
 
         // Snapshot and clear under the lock, then act outside it.
         // Close() → UnregisterFastbootSerial() and the device threads
@@ -296,6 +302,14 @@ private:
     // VID:PID of the fastboot USB device (set in Init(), used in DeviceAddedCallback).
     uint16_t m_fastbootVid = 0;
     uint16_t m_fastbootPid = 0;
+
+    struct FastbootArrival {
+        std::chrono::steady_clock::time_point deadline;
+        bool arrived = false;
+    };
+    std::mutex m_fastbootArrivalMutex;
+    std::condition_variable m_fastbootArrivalCV;
+    std::deque<std::shared_ptr<FastbootArrival>> m_pendingFastbootArrivals;
 
     // A device and the thread driving it, owned together so both are torn
     // down as a unit.  The thread was previously detached, which left it
@@ -559,7 +573,7 @@ private:
         m_responseCallback(response);
     }
 
-    void AstraDeviceThread(std::shared_ptr<AstraDevice> astraDevice)
+    void AstraDeviceThread(std::shared_ptr<AstraDevice> astraDevice, bool expectsFastboot = false)
     {
         ASTRA_LOG;
 
@@ -579,8 +593,21 @@ private:
 
             astraDevice->SetStatusCallback(m_responseCallback);
 
+            std::shared_ptr<FastbootArrival> arrival;
+            if (expectsFastboot) {
+                arrival = std::make_shared<FastbootArrival>();
+                arrival->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+                std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
+                m_pendingFastbootArrivals.push_back(arrival);
+            }
+
             log(ASTRA_LOG_LEVEL_DEBUG) << "Calling boot" << endLog;
             int ret = astraDevice->Boot(m_bootImage, m_bootStage);
+            if (arrival && ret <= 0) {
+                std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
+                auto &pending = m_pendingFastbootArrivals;
+                pending.erase(std::remove(pending.begin(), pending.end(), arrival), pending.end());
+            }
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to boot device" << endLog;
                 m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
@@ -604,6 +631,27 @@ private:
                 if (enumerationBlocked) {
                     m_transport->UnblockDeviceEnumeration();
                     if (m_fastbootTransport) { m_fastbootTransport->UnblockDeviceEnumeration(); }
+                }
+                if (arrival) {
+                    std::unique_lock<std::mutex> lock(m_fastbootArrivalMutex);
+                    const bool ready = m_fastbootArrivalCV.wait_until(lock, arrival->deadline,
+                        [this, &arrival] { return arrival->arrived || m_shuttingDown.load(); });
+                    auto &pending = m_pendingFastbootArrivals;
+                    pending.erase(std::remove(pending.begin(), pending.end(), arrival), pending.end());
+                    const bool timedOut = !ready && !m_shuttingDown.load();
+                    lock.unlock();
+                    if (timedOut) {
+                        const std::string message = "Timed out waiting for fastboot enumeration after 120 seconds";
+                        log(ASTRA_LOG_LEVEL_ERROR) << message << endLog;
+                        if (!m_runContinuously) {
+                            m_completed.store(true);
+                        }
+                        ResponseCallback({DeviceResponse{astraDevice->GetDeviceName(),
+                            ASTRA_DEVICE_STATUS_UPDATE_FAIL, 0, "", message}});
+                        if (!m_runContinuously) {
+                            ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_SHUTDOWN, message}});
+                        }
+                    }
                 }
                 return;
             }
@@ -795,6 +843,21 @@ private:
             return;  // never create a new AstraDevice/thread for this gadget
         }
 
+        const bool isFastboot = m_fastbootVid != 0 && m_fastbootPid != 0 &&
+            device->GetVendorId() == m_fastbootVid && device->GetProductId() == m_fastbootPid;
+        if (isFastboot) {
+            std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
+            if (!m_pendingFastbootArrivals.empty()) {
+                m_pendingFastbootArrivals.front()->arrived = true;
+                m_pendingFastbootArrivals.pop_front();
+                m_fastbootArrivalCV.notify_all();
+            }
+        }
+        const bool expectsFastboot = m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE &&
+            m_deviceSeries == ASTRA_SERIES_SL26XX && m_fastbootVid != 0 && m_fastbootPid != 0 &&
+            device->GetVendorId() == m_bootImage->GetSysMgrVendorId() &&
+            device->GetProductId() == m_bootImage->GetSysMgrProductId();
+
         // Normal path: new device arrival — create an impl and spawn a thread.
         std::shared_ptr<AstraDevice> astraDevice = std::make_shared<AstraDevice>(std::move(device), m_tempDir,
             m_managerMode == ASTRA_DEVICE_MANAGER_MODE_BOOT, m_bootCommand, m_deviceSeries,
@@ -834,8 +897,8 @@ private:
             // is always visible to Shutdown().  It sets 'finished' only after
             // AstraDeviceThread returns, i.e. once it no longer touches this
             // object.
-            std::thread worker([this, astraDevice, finished]() {
-                AstraDeviceThread(astraDevice);
+            std::thread worker([this, astraDevice, finished, expectsFastboot]() {
+                AstraDeviceThread(astraDevice, expectsFastboot);
                 finished->store(true);
             });
 
