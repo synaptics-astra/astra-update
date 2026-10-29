@@ -3,6 +3,7 @@
 
 #include "win_libusb_transport.hpp"
 #include "astra_log.hpp"
+#include <algorithm>
 #include <initguid.h>
 #include <devpkey.h>
 #include <usbiodef.h>
@@ -101,6 +102,9 @@ void WinLibUSBTransport::Shutdown()
         // Join the base-class callback-worker thread now that the event thread
         // has exited and no more devices can be enqueued.
         StopCallbackWorkerThread();
+
+        std::lock_guard<std::mutex> activeLock(m_activeDevicesMutex);
+        m_activeDevices.clear();
     }
 }
 
@@ -179,11 +183,12 @@ LRESULT CALLBACK WinLibUSBTransport::WndProc(HWND hWnd, UINT message, WPARAM wPa
     if (message == WM_DEVICECHANGE) {
         WinLibUSBTransport* handler = reinterpret_cast<WinLibUSBTransport*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
-        if (wParam == DBT_DEVICEARRIVAL) {
+        if (wParam == DBT_DEVICEARRIVAL || wParam == DBT_DEVICEREMOVECOMPLETE) {
             PDEV_BROADCAST_HDR pHdr = reinterpret_cast<PDEV_BROADCAST_HDR>(lParam);
             if (pHdr->dbch_devicetype == DBT_DEVTYP_DEVICEINTERFACE) {
                 PDEV_BROADCAST_DEVICEINTERFACE pDevInf = reinterpret_cast<PDEV_BROADCAST_DEVICEINTERFACE>(pHdr);
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Device Arrived: " << pDevInf->dbcc_name << endLog;
+                log(ASTRA_LOG_LEVEL_DEBUG) << (wParam == DBT_DEVICEARRIVAL ? "Device Arrived: " : "Device Removed: ")
+                    << pDevInf->dbcc_name << endLog;
                 if (handler) {
                     handler->OnDeviceArrived();
                 }
@@ -270,6 +275,17 @@ void WinLibUSBTransport::ProcessPendingDevices()
             return;
         }
 
+        {
+            std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
+            for (auto active = m_activeDevices.begin(); active != m_activeDevices.end();) {
+                if (std::find(device_list, device_list + count, active->second.get()) == device_list + count) {
+                    active = m_activeDevices.erase(active);
+                } else {
+                    ++active;
+                }
+            }
+        }
+
         for (ssize_t i = 0; i < count; ++i) {
             libusb_device *device = device_list[i];
             libusb_device_descriptor desc;
@@ -296,9 +312,14 @@ void WinLibUSBTransport::ProcessPendingDevices()
                 // Check if we've already opened this device in this process
                 {
                     std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
-                    if (m_activeDevices.find(usbPath) != m_activeDevices.end()) {
+                    auto active = m_activeDevices.find(usbPath);
+                    if (active != m_activeDevices.end() && active->second.get() == device) {
                         log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " already opened in this process, skipping" << endLog;
                         continue;
+                    }
+                    if (active != m_activeDevices.end()) {
+                        log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " re-enumerated, replacing stale active device" << endLog;
+                        m_activeDevices.erase(active);
                     }
                 }
 
@@ -329,7 +350,7 @@ void WinLibUSBTransport::ProcessPendingDevices()
                 // Add to active devices set to prevent duplicate opens
                 {
                     std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
-                    m_activeDevices.insert(usbPath);
+                    m_activeDevices[usbPath] = std::shared_ptr<libusb_device>(libusb_ref_device(device), libusb_unref_device);
                     log(ASTRA_LOG_LEVEL_DEBUG) << "Added device: " << usbPath << " to active devices set" << endLog;
                 }
 
