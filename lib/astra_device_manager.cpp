@@ -563,7 +563,8 @@ private:
                 m_failureReported = true;
             }
         } else if (response.IsDeviceResponse()) {
-            if (response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
+            if (response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
+                response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
                 response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL)
             {
                 m_removeTempOnClose = false;
@@ -609,14 +610,17 @@ private:
                 pending.erase(std::remove(pending.begin(), pending.end(), arrival), pending.end());
             }
             if (ret < 0) {
-                log(ASTRA_LOG_LEVEL_ERROR) << "Failed to boot device" << endLog;
+                const bool openFailed = astraDevice->GetDeviceStatus() == ASTRA_DEVICE_STATUS_OPEN_FAIL;
+                log(ASTRA_LOG_LEVEL_ERROR) << (openFailed ? "Failed to initialize device connection" : "Failed to boot device") << endLog;
                 m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
                 if (m_fastbootTransport) { m_fastbootTransport->RemoveActiveDevice(astraDevice->GetUSBPath()); }
                 if (enumerationBlocked) {
                     m_transport->UnblockDeviceEnumeration();
                     if (m_fastbootTransport) { m_fastbootTransport->UnblockDeviceEnumeration(); }
                 }
-                ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
+                if (!openFailed) {
+                    ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
+                }
                 return;
             }
 

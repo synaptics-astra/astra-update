@@ -144,8 +144,10 @@ int main(int argc, char* argv[])
                 std::cout << "Booting Device: " << deviceResponse.m_deviceName << std::endl;
             } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE) {
                 std::cout << "Booting " << deviceResponse.m_deviceName << " is complete" << std::endl;
-            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
-                std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: "
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
+                deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
+                std::cout << "Device: " << deviceResponse.m_deviceName
+                          << (deviceResponse.m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ? " Connection Failed: " : " Boot Failed: ")
                           << deviceResponse.m_message << std::endl;
                 if (continuous && exitOnError) {
                     astra_cli::g_running.store(false);

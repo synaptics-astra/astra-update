@@ -178,17 +178,17 @@ public:
             return 0;
         }
 
+        m_deviceName = "device:" + m_usbDevice->GetUSBPath();
         int ret = m_usbDevice->Open(std::bind(&AstraDeviceSL26XXImpl::USBEventHandler, this,
             std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
         if (ret < 0) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to open SL26XX device" << endLog;
-            m_status = ASTRA_DEVICE_STATUS_BOOT_FAIL;
-            ReportStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to open device");
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to initialize SL26XX connection on " << m_usbDevice->GetUSBPath() << endLog;
+            m_status = ASTRA_DEVICE_STATUS_OPEN_FAIL;
+            ReportStatus(ASTRA_DEVICE_STATUS_OPEN_FAIL, 0, "", "Failed to initialize device connection; no boot commands sent");
             return ret;
         }
 
         m_deviceOpened = true;
-        m_deviceName = "device:" + m_usbDevice->GetUSBPath();
         m_status = ASTRA_DEVICE_STATUS_OPENED;
 
         m_status = ASTRA_DEVICE_STATUS_BOOT_START;

@@ -121,6 +121,7 @@ const std::string AstraDevice::AstraDeviceStatusToString(AstraDeviceStatus statu
         "ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS",
         "ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE",
         "ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL",
+        "ASTRA_DEVICE_STATUS_OPEN_FAIL",
     };
 
     return statusStrings[status];

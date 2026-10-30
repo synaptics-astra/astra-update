@@ -63,6 +63,8 @@ int WinUSBCDCDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_
     m_usbEventCallback = usbEventCallback;
 
     const std::string comPath = ToComDevicePath(m_usbPath);
+    log(ASTRA_LOG_LEVEL_DEBUG) << "Opening CDC port " << comPath
+        << " vid=0x" << std::hex << m_vendorId << " pid=0x" << m_productId << std::dec << endLog;
     m_handle = CreateFileA(comPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
     if (m_handle == INVALID_HANDLE_VALUE) {
@@ -73,7 +75,7 @@ int WinUSBCDCDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_
     DCB dcb = {};
     dcb.DCBlength = sizeof(DCB);
     if (!GetCommState(m_handle, &dcb)) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "GetCommState failed: " << GetLastError() << endLog;
+        log(ASTRA_LOG_LEVEL_ERROR) << "GetCommState failed on " << comPath << ": " << GetLastError() << endLog;
         CloseHandle(m_handle);
         m_handle = INVALID_HANDLE_VALUE;
         return -1;
@@ -95,7 +97,7 @@ int WinUSBCDCDevice::Open(std::function<void(USBEvent event, uint8_t *buf, size_
     dcb.fAbortOnError = FALSE;
 
     if (!SetCommState(m_handle, &dcb)) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "SetCommState failed: " << GetLastError() << endLog;
+        log(ASTRA_LOG_LEVEL_ERROR) << "SetCommState failed on " << comPath << ": " << GetLastError() << endLog;
         CloseHandle(m_handle);
         m_handle = INVALID_HANDLE_VALUE;
         return -1;

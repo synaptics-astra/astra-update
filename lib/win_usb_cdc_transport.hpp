@@ -13,6 +13,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "usb_cdc_transport.hpp"
@@ -36,6 +37,7 @@ private:
         uint16_t m_vendorId{0};
         uint16_t m_productId{0};
         uint8_t m_numInterfaces{0};
+        std::string m_instance;
     };
 
     void RunHotplugHandler();
@@ -60,5 +62,6 @@ private:
     std::condition_variable m_pendingDevicesCV;
 
     std::set<std::string> m_activeDevices;
+    std::unordered_map<std::string, std::string> m_observedDevices;
     std::mutex m_activeDevicesMutex;
 };
