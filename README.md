@@ -15,6 +15,8 @@ Boot images are specific to the Astra SoC and board. Astra Update imports a coll
 
 Update images can also contain their own ``manifest.yaml`` file which specifies which boot image it requires. The boot image ID can also be set as a command line parameter. If an update image does not specify a boot image ID, then Astra Update can try to determine the correct boot image based on the characteristics of the update image. Manifest files are required for boot images, but are optional for update images.
 
+Automatic selection requires matching the chip, secure boot version, and memory layout. When a board or DDR type is specified, it must also match; omitting either leaves only that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
+
 ### The Temp Directory
 
 Astra Update creates a temp directory to store logs and supporting files which are used during the boot and update processes. By default, the temp directory will be created in the system default temp directory (``/tmp`` on Linux and Mac OS, ``C:\Users\<Username>\AppData\Local\Temp\`` on Windows). The temp directory contains the ``astradevicemanager.log`` file containing all logs for the execution of the process. The directory also contains device specific sub-directories which contains supporting data for each Astra device detected. The path of the temp directory can also be specified on the command line.
