@@ -15,7 +15,7 @@ Boot images are specific to the Astra SoC and board. Astra Update imports a coll
 
 Update images can also contain their own ``manifest.yaml`` file which specifies which boot image it requires. The boot image ID can also be set as a command line parameter. If an update image does not specify a boot image ID, then Astra Update can try to determine the correct boot image based on the characteristics of the update image. Manifest files are required for boot images, but are optional for update images.
 
-Automatic selection requires matching the chip, secure boot version, and memory layout. When a board or DDR type is specified, it must also match; omitting either leaves only that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
+Automatic selection requires matching the chip, secure boot version, and memory layout. Use ``--board any`` or ``board: any`` in an update image manifest to explicitly allow any board; a specific board name must match. An omitted or empty board remains unrestricted for backward compatibility. When a DDR type is specified, it must also match; omitting it leaves that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
 
 ### The Temp Directory
 
@@ -81,7 +81,7 @@ To flash a SPI update image directory run:
 To flash SPI images without a ``manifest.yaml``:
 
 ```bash
-    astra-update --image-type spi --chip sl1680 --flash /home/user/Downloads/spi_uboot_en.bin
+    astra-update --image-type spi --chip sl1680 --board any --flash /home/user/Downloads/spi_uboot_en.bin
 ```
 
 ### Additional Options
@@ -104,7 +104,7 @@ Astra Update also has additional command line parameters for providing details a
 These command line parameters describe the update image. If the image contains a ``manifest.yaml`` file then these parameters will override those in the file.
 
 * -f, --flash arg - the path to the update image.
-* -b, --board arg - the board required for this update image.
+* -b, --board arg - the board required for this update image; ``any`` explicitly allows any board.
 * -c, --chip arg - the SoC required for this update image.
 * -i, --boot-image-id arg - the boot image ID required for this update image.
 * -t, --image-type arg - the type of the update image (eMMC, SPI, NAND).

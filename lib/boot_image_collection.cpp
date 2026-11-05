@@ -88,7 +88,8 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
             if (bootImage->GetChipName() == candidateChipName && bootImage->GetSecureBootVersion() == secureBoot
               && bootImage->GetMemoryLayout() == memoryLayout)
             {
-                const bool boardImageMatch = boardName.empty() || bootImage->GetBoardName() == boardName;
+                const bool boardImageMatch = boardName.empty() || boardName == "any"
+                    || bootImage->GetBoardName() == boardName;
                 const bool ddrTypeMatch = memoryDDRType == ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED
                     || bootImage->GetMemoryDDRType() == memoryDDRType;
 
