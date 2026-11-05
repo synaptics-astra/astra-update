@@ -25,15 +25,3 @@ int USBCDCDevice::WriteInterruptData(const uint8_t *data, size_t size)
     log(ASTRA_LOG_LEVEL_WARNING) << "WriteInterruptData is unsupported for CDC devices" << endLog;
     return -1;
 }
-
-void USBCDCDevice::StopCallbackWorker()
-{
-    ASTRA_LOG;
-
-    if (m_callbackThreadRunning.exchange(false)) {
-        m_callbackQueueCV.notify_all();
-        if (m_callbackThread.joinable()) {
-            m_callbackThread.join();
-        }
-    }
-}

@@ -23,8 +23,18 @@ int USBDevice::EnableInterrupts()
 
     // Start callback worker thread to process queued interrupts
     // Interrupt transfer was already submitted in Open(), so interrupts are already queuing
-    m_callbackThreadRunning.store(true);
-    m_callbackThread = std::thread([this]() { this->CallbackWorkerThread(); });
+    std::lock_guard<std::mutex> workerLock(m_callbackWorkerMutex);
+    if (m_callbackThreadRunning.load()) {
+        return 0;
+    }
+    if (m_callbackThread.joinable()) {
+        m_callbackThread.join();
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_callbackQueueMutex);
+        m_callbackThreadRunning.store(true);
+        m_callbackThread = std::thread([this]() { this->CallbackWorkerThread(); });
+    }
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "Callback worker thread started, processing queued interrupts" << endLog;
 
@@ -35,7 +45,7 @@ void USBDevice::CallbackWorkerThread()
 {
     ASTRA_LOG;
 
-    while (m_callbackThreadRunning.load()) {
+    while (true) {
         CallbackEvent event;
         {
             std::unique_lock<std::mutex> lock(m_callbackQueueMutex);
@@ -79,4 +89,21 @@ void USBDevice::QueueCallbackAction(std::function<void()> action)
         m_callbackQueue.push(std::move(event));
     }
     m_callbackQueueCV.notify_one();
+}
+
+void USBDevice::StopCallbackWorker()
+{
+    bool wasRunning = false;
+    std::lock_guard<std::mutex> workerLock(m_callbackWorkerMutex);
+    {
+        std::lock_guard<std::mutex> lock(m_callbackQueueMutex);
+        wasRunning = m_callbackThreadRunning.exchange(false);
+    }
+
+    if (wasRunning) {
+        m_callbackQueueCV.notify_all();
+    }
+    if (m_callbackThread.joinable()) {
+        m_callbackThread.join();
+    }
 }
