@@ -12,7 +12,7 @@
 #include "flash_image.hpp"
 #include "astra_device.hpp"
 
-const std::string astraUpdateVersion = "2.0.4";
+const std::string astraUpdateVersion = "2.0.4+";
 
 int main(int argc, char* argv[])
 {
@@ -197,8 +197,10 @@ int main(int argc, char* argv[])
                 std::cout << "Updating Device: " << deviceResponse.m_deviceName << std::endl;
             } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
                 std::cout << "Device: " << deviceResponse.m_deviceName << " Update Complete" << std::endl;
-            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
-                std::cout << "Device: " << deviceResponse.m_deviceName << " Boot Failed: "
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
+                deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
+                std::cout << "Device: " << deviceResponse.m_deviceName
+                          << (deviceResponse.m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ? " Connection Failed: " : " Boot Failed: ")
                           << deviceResponse.m_message << std::endl;
                 if (continuous && exitOnError) {
                     astra_cli::g_running.store(false);

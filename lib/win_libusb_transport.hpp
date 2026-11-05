@@ -7,7 +7,7 @@
 #include <dbt.h>
 #include <thread>
 #include <memory>
-#include <set>
+#include <unordered_map>
 #include <string>
 
 #include "libusb_transport.hpp"
@@ -41,6 +41,6 @@ private:
     std::mutex m_pendingDevicesMutex;
     std::condition_variable m_pendingDevicesCV;
 
-    std::set<std::string> m_activeDevices;  // Track USB paths of currently opened devices
+    std::unordered_map<std::string, std::shared_ptr<libusb_device>> m_activeDevices;
     std::mutex m_activeDevicesMutex;
 };

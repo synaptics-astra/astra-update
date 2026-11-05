@@ -9,8 +9,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cfgmgr32.h>
 #include <devguid.h>
 #include <initguid.h>
+#include <devpkey.h>
 #include <setupapi.h>
 #include <sstream>
 #include <usbiodef.h>
@@ -73,6 +75,7 @@ void WinUSBCDCTransport::Shutdown()
 
         std::lock_guard<std::mutex> activeLock(m_activeDevicesMutex);
         m_activeDevices.clear();
+        m_observedDevices.clear();
     }
 }
 
@@ -212,6 +215,13 @@ void WinUSBCDCTransport::ProcessPendingDevices()
                 ++it;
             }
         }
+        for (auto observed = m_observedDevices.begin(); observed != m_observedDevices.end();) {
+            if (presentPorts.find(observed->first) == presentPorts.end()) {
+                observed = m_observedDevices.erase(observed);
+            } else {
+                ++observed;
+            }
+        }
     }
 
     for (const auto &enumeratedPort : ports) {
@@ -222,12 +232,17 @@ void WinUSBCDCTransport::ProcessPendingDevices()
 
         {
             std::lock_guard<std::mutex> lock(m_activeDevicesMutex);
-            if (m_activeDevices.find(port) != m_activeDevices.end()) {
+            auto observed = m_observedDevices.find(port);
+            if (observed != m_observedDevices.end() && observed->second == enumeratedPort.m_instance) {
                 continue;
             }
+            m_observedDevices[port] = enumeratedPort.m_instance;
             m_activeDevices.insert(port);
         }
 
+        log(ASTRA_LOG_LEVEL_DEBUG) << "CDC arrival: " << port << " instance=" << enumeratedPort.m_instance
+            << " vid=0x" << std::hex << enumeratedPort.m_vendorId
+            << " pid=0x" << enumeratedPort.m_productId << std::dec << endLog;
         std::unique_ptr<USBDevice> usbDevice = std::make_unique<WinUSBCDCDevice>(port,
             enumeratedPort.m_vendorId, enumeratedPort.m_productId, enumeratedPort.m_numInterfaces);
         if (m_deviceAddedCallback) {
@@ -297,7 +312,24 @@ std::vector<WinUSBCDCTransport::EnumeratedPort> WinUSBCDCTransport::EnumerateMat
         }
 
         if (vidPidMatches) {
-            ports.push_back({port, detectedVid, detectedPid, detectedNumInterfaces});
+            char instanceId[MAX_DEVICE_ID_LEN] = {};
+            if (!SetupDiGetDeviceInstanceIdA(deviceInfoSet, &deviceInfoData, instanceId,
+                    sizeof(instanceId), nullptr)) {
+                log(ASTRA_LOG_LEVEL_WARNING) << "Cannot identify CDC port " << port << ": " << GetLastError() << endLog;
+                continue;
+            }
+            std::string instance(instanceId);
+            FILETIME arrival = {};
+            DEVPROPTYPE propertyType = 0;
+            if (SetupDiGetDevicePropertyW(deviceInfoSet, &deviceInfoData, &DEVPKEY_Device_LastArrivalDate,
+                    &propertyType, reinterpret_cast<PBYTE>(&arrival), sizeof(arrival), nullptr, 0) &&
+                    propertyType == DEVPROP_TYPE_FILETIME) {
+                instance += ":" + std::to_string(arrival.dwHighDateTime) + ":" + std::to_string(arrival.dwLowDateTime);
+            } else {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "CDC port " << port
+                    << " has no arrival timestamp; reconnect detection requires an observed disconnect" << endLog;
+            }
+            ports.push_back({port, detectedVid, detectedPid, detectedNumInterfaces, instance});
         }
     }
 
