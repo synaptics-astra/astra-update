@@ -57,6 +57,23 @@ int main(int argc, char **argv)
         REQUIRE(image.GetFinalBootImage() == "gen3_uboot.bin.usb");
         REQUIRE(image.GetImages().empty());
     });
+    suite.Add("legacy-vs680-manifest-without-uboot-version", [] {
+        test::TempDirectory directory;
+        auto fields = test::BootManifest("b6ca8c4c-8fed-11ef-adc7-f37d7c7832cc");
+        fields["chip"] = "vs680";
+        fields["board"] = "generic";
+        fields["secure_boot"] = "gen2";
+        fields["product_id"] = "00B1";
+        fields["console"] = "usb";
+        fields["memory_layout"] = "1gb";
+        fields["uboot"] = "uboot";
+        fields.erase("uboot_version");
+        const auto image = Load(directory, fields);
+        REQUIRE(image.GetChipName() == "vs680");
+        REQUIRE(image.GetProductId() == 0x00B1);
+        REQUIRE(image.GetSecureBootVersion() == ASTRA_SECURE_BOOT_V2);
+        REQUIRE(image.GetUbootVersion() == ASTRA_UBOOT_VERSION_UNKNOWN);
+    });
     for (const auto layout : test::layouts) {
         suite.Add(std::string("layout-") + layout.name, [=] {
             test::TempDirectory directory;
@@ -257,6 +274,9 @@ int main(int argc, char **argv)
         REQUIRE(names == std::set<std::string>{"top.bin", "nested/payload.bin", "nested/manifest.yaml"});
     });
     for (const auto &field : test::BootManifest()) {
+        if (field.first == "uboot_version") {
+            continue;
+        }
         suite.Add("missing-required-field-" + field.first, [key = field.first] {
             auto fields = test::BootManifest();
             fields.erase(key);
