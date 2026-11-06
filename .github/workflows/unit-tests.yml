@@ -1,0 +1,59 @@
+name: Library unit tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: ${{ matrix.os }} / ${{ matrix.config }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-14]
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - name: Configure
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+      - name: Build unit tests
+        run: cmake --build build --config ${{ matrix.config }} --target unit-tests --parallel 2
+      - name: Run unit tests
+        run: ctest --test-dir build -C ${{ matrix.config }} -L unit --output-on-failure
+      - name: Configure without tests
+        run: cmake -S . -B build-no-tests -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+      - name: Build library without tests
+        run: cmake --build build-no-tests --config ${{ matrix.config }} --target astraupdate --parallel 2
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ matrix.os }}-${{ matrix.config }}
+          path: build/Testing/Temporary/LastTest.log
+
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install coverage dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev gcovr
+      - name: Configure coverage
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug -DASTRA_ENABLE_COVERAGE=ON
+      - name: Build and run
+        run: |
+          cmake --build build --target unit-tests --parallel 2
+          ctest --test-dir build -L unit --output-on-failure
+      - name: Report project coverage
+        run: gcovr --root . --filter '^lib/' --filter '^include/' --exclude-unreachable-branches --exclude-throw-branches --print-summary --xml-pretty --output build/coverage.xml build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-coverage
+          path: build/coverage.xml

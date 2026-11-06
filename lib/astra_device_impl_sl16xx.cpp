@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -51,8 +52,11 @@ public:
         }
 
         m_ubootConsole = bootImage->GetUbootConsole();
-        m_requestedImageName.clear();
-        m_imageRequestReady.store(false);
+        {
+            std::lock_guard<std::mutex> lock(m_imageRequestMutex);
+            m_pendingImageRequests.clear();
+            m_lastRequestedImageName.clear();
+        }
 
         int ret = m_usbDevice->Open(std::bind(&AstraDeviceSL16XXImpl::USBEventHandler, this,
             std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
@@ -240,9 +244,13 @@ private:
     // Interrupt / image-request signalling.
     std::condition_variable m_imageRequestCV;
     std::mutex m_imageRequestMutex;
-    std::atomic<bool> m_imageRequestReady{false};
+    struct ImageRequest {
+        std::string name;
+        uint8_t type;
+    };
+    std::deque<ImageRequest> m_pendingImageRequests;
+    std::string m_lastRequestedImageName;
     uint8_t m_imageType = 0;
-    std::string m_requestedImageName;
 
     // Bulk-write buffer.
     static constexpr int m_imageBufferSize = (1 * 1024 * 1024) + 4;
@@ -273,24 +281,22 @@ private:
         log(ASTRA_LOG_LEVEL_DEBUG) << "WaitForImageRequest: waiting" << endLog;
 
         const bool notified = m_imageRequestCV.wait_for(lock, timeout, [this] {
-            return m_imageRequestReady.load() || !m_running.load();
+            return !m_pendingImageRequests.empty() || !m_running.load();
         });
 
         if (!m_running.load()) {
             return false; // shutdown
         }
 
-        if (!notified || !m_imageRequestReady.load()) {
+        if (!notified || m_pendingImageRequests.empty()) {
             return false; // timeout
         }
 
-        m_imageRequestReady.store(false);
-
-        // Copy while still holding the lock.  HandleInterrupt publishes both
-        // fields under the same lock, so a second interrupt cannot rewrite
-        // them while the image-request loop is reading them.
-        name      = m_requestedImageName;
-        imageType = m_imageType;
+        auto request = std::move(m_pendingImageRequests.front());
+        m_pendingImageRequests.pop_front();
+        name = std::move(request.name);
+        imageType = request.type;
+        m_imageType = request.type;
         return true;
     }
 
@@ -334,13 +340,12 @@ private:
                 << static_cast<int>(imageType) << std::dec << endLog;
             log(ASTRA_LOG_LEVEL_DEBUG) << "Requested image name: '" << imageName << "'" << endLog;
 
-            // Publish under the lock so WaitForImageRequest cannot observe a
-            // half-updated name/type pair.
+            // Keep every interrupt request paired and ordered until the
+            // image-request loop consumes it.
             {
                 std::lock_guard<std::mutex> lock(m_imageRequestMutex);
-                m_imageType = imageType;
-                m_requestedImageName = std::move(imageName);
-                m_imageRequestReady.store(true);
+                m_lastRequestedImageName = imageName;
+                m_pendingImageRequests.push_back({std::move(imageName), imageType});
             }
             m_imageRequestCV.notify_one();
         } else if (m_console != nullptr) {
@@ -361,7 +366,7 @@ private:
             std::string lastRequestedImage;
             {
                 std::lock_guard<std::mutex> lock(m_imageRequestMutex);
-                lastRequestedImage = m_requestedImageName;
+                lastRequestedImage = m_lastRequestedImageName;
             }
 
             // When using SU-Boot, gen3_miniloader.bin.usb causes reset/reconnect.

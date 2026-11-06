@@ -3,6 +3,7 @@
 
 #include "fastboot_device.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -87,7 +88,7 @@ bool FastBootDevice::SendCommand(const std::string &command)
     auto *data = reinterpret_cast<uint8_t *>(const_cast<char *>(command.c_str()));
     int transferred = 0;
     int ret = m_usbDevice->Write(data, command.size(), &transferred);
-    if (ret < 0) {
+    if (ret < 0 || transferred < 0 || static_cast<size_t>(transferred) != command.size()) {
         log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: send command failed: " << command << endLog;
         return false;
     }
@@ -112,8 +113,8 @@ bool FastBootDevice::ReadResponse(std::string &status, std::string &message, int
         return false;
     }
 
-    if (received < 4) {
-        log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: response too short: " << received << " bytes" << endLog;
+    if (received < 4 || static_cast<size_t>(received) > kRespBufferSize) {
+        log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: invalid response size: " << received << " bytes" << endLog;
         return false;
     }
 
@@ -151,6 +152,13 @@ std::string FastBootDevice::ExecuteCommand(const std::string &command, uint32_t 
 
         if (status == "DATA") {
             // message is 8-digit hex size
+            if (message.size() != 8 || !std::all_of(message.begin(), message.end(), [](unsigned char ch) {
+                return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
+                    (ch >= 'A' && ch <= 'F');
+            })) {
+                log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: invalid DATA size: " << message << endLog;
+                return "";
+            }
             try {
                 dataSize = static_cast<uint32_t>(std::stoul(message, nullptr, 16));
             } catch (const std::exception &) {

@@ -107,7 +107,7 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             m_ubootVariant = ASTRA_UBOOT_VARIANT_UNKNOWN;
         }
 
-        std::string ubootVersionString = manifest["uboot_version"].as<std::string>();
+        std::string ubootVersionString = manifest["uboot_version"].as<std::string>("");
         log (ASTRA_LOG_LEVEL_DEBUG) << "U-Boot version string from manifest: " << ubootVersionString << endLog;
         std::transform(ubootVersionString.begin(), ubootVersionString.end(), ubootVersionString.begin(), ::tolower);
 
