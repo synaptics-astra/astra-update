@@ -16,6 +16,11 @@
 
 USBTransport::~USBTransport() = default;
 
+bool USBTransport::NotifyDeviceObserved(uint16_t vendorId, uint16_t productId, const std::string &usbPath)
+{
+    return m_deviceObservedCallback && m_deviceObservedCallback(vendorId, productId, usbPath);
+}
+
 std::vector<std::string> USBTransport::ParseFilterPortString(const std::string & filterPorts)
 {
     ASTRA_LOG;

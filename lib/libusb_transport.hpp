@@ -36,6 +36,10 @@ protected:
     std::string ConstructUSBPath(libusb_device *device);
     bool IsValidPort(libusb_device *device, const std::string &portString);
 
+    // Success with a null handle means the observer consumed this arrival.
+    int OpenDevice(libusb_device *device, const libusb_device_descriptor &desc,
+        const std::string &usbPath, libusb_device_handle **handle);
+
     static int LIBUSB_CALL HotplugEventCallback(libusb_context *ctx, libusb_device *device,
                                                 libusb_hotplug_event event, void *user_data);
 
