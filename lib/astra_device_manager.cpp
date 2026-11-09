@@ -413,6 +413,38 @@ private:
         log(ASTRA_LOG_LEVEL_DEBUG) << "Unregistered final-boot USB path " << path << endLog;
     }
 
+    bool DeviceObservedCallback(uint16_t vendorId, uint16_t productId, const std::string &path)
+    {
+        ASTRA_LOG;
+
+        if (vendorId != kLinuxGadgetVid || productId != kLinuxGadgetPid) {
+            return false;
+        }
+        if (m_shuttingDown.load() || (!m_runContinuously && m_completed.load())) {
+            return true;
+        }
+
+        std::shared_ptr<AstraDevice> existing;
+        {
+            std::lock_guard<std::mutex> lock(m_devicesMutex);
+            auto it = m_finalBootDeviceByPath.find(path);
+            if (it != m_finalBootDeviceByPath.end()) {
+                existing = it->second.lock();
+                if (!existing) {
+                    m_finalBootDeviceByPath.erase(it);
+                }
+            }
+        }
+        if (existing) {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot gadget detected on path " << path << endLog;
+            existing->NotifyFinalBootDetected();
+        } else {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot gadget arrived on unrecognized path "
+                << path << "; ignoring" << endLog;
+        }
+        return true;
+    }
+
     static AstraDeviceSeries DetectDeviceSeries(const std::string &chipName)
     {
         std::string chipNameLower = chipName;
@@ -507,6 +539,12 @@ private:
             << (m_transportType == ASTRA_TRANSPORT_USB_CDC ? "cdc" : "usb") << endLog;
         log(ASTRA_LOG_LEVEL_INFO) << "Using device series implementation: " << AstraDevice::AstraDeviceSeriesToString(m_deviceSeries) << endLog;
 
+        if (watchLinuxGadget && m_transportType != ASTRA_TRANSPORT_USB_CDC) {
+            m_transport->SetDeviceObservedCallback(
+                std::bind(&AstraDeviceManagerImpl::DeviceObservedCallback, this,
+                    std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+        }
+
         if (m_transport->Init(vendorProductIds, m_filterPorts,
                 std::bind(&AstraDeviceManagerImpl::DeviceAddedCallback, this, std::placeholders::_1)) < 0)
         {
@@ -531,6 +569,9 @@ private:
                 // Bulk USB, same as fastboot -- must be watched on this
                 // secondary transport too, not the CDC-based primary one.
                 fastbootVendorProductIds.push_back({kLinuxGadgetVid, kLinuxGadgetPid});
+                m_fastbootTransport->SetDeviceObservedCallback(
+                    std::bind(&AstraDeviceManagerImpl::DeviceObservedCallback, this,
+                        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
             }
 
             if (m_fastbootTransport->Init(fastbootVendorProductIds, m_filterPorts,
@@ -769,6 +810,10 @@ private:
 
         log(ASTRA_LOG_LEVEL_DEBUG) << "Device added AstraDeviceManagerImpl::DeviceAddedCallback" << endLog;
 
+        if (DeviceObservedCallback(device->GetVendorId(), device->GetProductId(), device->GetUSBPath())) {
+            return;
+        }
+
         // Only probe when some impl is actually waiting to be rebound.
         // Probing opens the device and sends it a fastboot getvar, and a
         // manifest may well use generic fastboot IDs that other vendors'
@@ -818,33 +863,6 @@ private:
                     return;  // do NOT create a new AstraDevice or spawn a new thread
                 }
             }
-        }
-
-        // Post-flash Linux boot gadget: a specific, real completion signal
-        // for SL26XX updates, disambiguated by USB port path (its serial is
-        // just the chip name, shared by every board of that model, so it
-        // cannot tell concurrent devices apart on its own).
-        if (device->GetVendorId() == kLinuxGadgetVid && device->GetProductId() == kLinuxGadgetPid) {
-            const std::string path = device->GetUSBPath();
-            std::shared_ptr<AstraDevice> existing;
-            {
-                std::lock_guard<std::mutex> lock(m_devicesMutex);
-                auto it = m_finalBootDeviceByPath.find(path);
-                if (it != m_finalBootDeviceByPath.end()) {
-                    existing = it->second.lock();
-                    if (!existing) {
-                        m_finalBootDeviceByPath.erase(it);
-                    }
-                }
-            }
-            if (existing) {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot gadget detected on path " << path << endLog;
-                existing->NotifyFinalBootDetected();
-            } else {
-                log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot gadget arrived on unrecognized path "
-                    << path << "; ignoring" << endLog;
-            }
-            return;  // never create a new AstraDevice/thread for this gadget
         }
 
         const bool isFastboot = m_fastbootVid != 0 && m_fastbootPid != 0 &&

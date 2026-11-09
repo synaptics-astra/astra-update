@@ -39,6 +39,12 @@ does not emit visible transfer events. SL26XX also reports `WAITING_FOR_DEVICE`
 with an empty image name during its final flash/reboot wait. These events do not
 claim that the protocol can distinguish individual erase and write phases.
 
+For SL26XX updates, the post-flash Linux USB gadget (`1D6B:0104`) on the
+updating device's USB port path ends this final wait. Detection uses enumeration
+metadata only: it does not open or claim the gadget, so denied libusb access
+does not hide an enumerated completion gadget.
+If the gadget is not detected, the existing 300-second fallback still applies.
+
 Configure with `-DASTRA_BUILD_TESTS=ON`, build `astra-device-events-test`, and run
 `ctest --test-dir build -C Debug -R astra-device-events --output-on-failure` to
 check the shared event sequence without hardware.

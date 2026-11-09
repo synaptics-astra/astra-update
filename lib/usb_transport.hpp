@@ -10,6 +10,7 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
+#include <utility>
 
 #include "usb_device.hpp"
 
@@ -30,6 +31,14 @@ public:
     }
     virtual void Shutdown() = 0;
 
+    // Configure before Init(). Return true to consume an arrival without opening
+    // the device. Runs on the enumeration/event thread and must not block.
+    void SetDeviceObservedCallback(
+        std::function<bool(uint16_t, uint16_t, const std::string &)> callback)
+    {
+        m_deviceObservedCallback = std::move(callback);
+    }
+
     // Block/unblock device enumeration during critical boot sequences
     // Default implementations are no-ops for non-Windows platforms
     virtual bool BlockDeviceEnumeration() { return true; }
@@ -47,5 +56,7 @@ protected:
     std::vector<USBVendorProductId> m_supportedDevices;
     std::vector<std::string> m_filterPorts;
 
+    std::function<bool(uint16_t, uint16_t, const std::string &)> m_deviceObservedCallback;
+    bool NotifyDeviceObserved(uint16_t vendorId, uint16_t productId, const std::string &usbPath);
     std::vector<std::string> ParseFilterPortString(const std::string& filterPorts);
 };

@@ -213,6 +213,16 @@ bool LibUSBTransport::IsValidPort(libusb_device *device, const std::string &devi
     return false;
 }
 
+int LibUSBTransport::OpenDevice(libusb_device *device, const libusb_device_descriptor &desc,
+    const std::string &usbPath, libusb_device_handle **handle)
+{
+    *handle = nullptr;
+    if (NotifyDeviceObserved(desc.idVendor, desc.idProduct, usbPath)) {
+        return LIBUSB_SUCCESS;
+    }
+    return libusb_open(device, handle);
+}
+
 int LIBUSB_CALL LibUSBTransport::HotplugEventCallback(libusb_context *ctx, libusb_device *device,
                                                 libusb_hotplug_event event, void *user_data)
 {
@@ -258,10 +268,13 @@ int LIBUSB_CALL LibUSBTransport::HotplugEventCallback(libusb_context *ctx, libus
         // If the device is in a bad state (e.g., kernel failed to configure it),
         // skip it and wait for re-enumeration
         libusb_device_handle *handle = nullptr;
-        ret = libusb_open(device, &handle);
+        ret = transport->OpenDevice(device, desc, usbPath, &handle);
         if (ret < 0) {
             log(ASTRA_LOG_LEVEL_WARNING) << "Device not accessible (" << libusb_error_name(ret)
                 << "), skipping and waiting for re-enumeration" << endLog;
+            return 0;
+        }
+        if (handle == nullptr) {
             return 0;
         }
 

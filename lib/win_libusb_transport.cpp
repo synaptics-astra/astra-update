@@ -326,12 +326,10 @@ void WinLibUSBTransport::ProcessPendingDevices()
                 // Windows calls OnDeviceArrived() when any USB device arrives, not
                 // just devices with a specific vid / pid. All USB devices are enumerated
                 // in this loop, including devices already in use by astra-update.
-                // On Windows try to open the device, if we get LIBUSB_ERROR_ACCESS then
-                // we are probably already using the device. But, LIBUSB_ERROR_ACCESS is only
-                // returned if the device is open by another process. For single instances of astra-update / astra-boot
-                // we also rely on active device tracking to prevent duplicate opens.
-                libusb_device_handle *handle;
-                ret = libusb_open(device, &handle);
+                // Access denied can mean another owner or driver/permission
+                // restrictions; it does not identify which process holds a device.
+                libusb_device_handle *handle = nullptr;
+                ret = OpenDevice(device, desc, usbPath, &handle);
                 if (ret == LIBUSB_ERROR_ACCESS) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported LIBUSB_ERROR_ACCESS" << endLog;
                     continue;
@@ -341,6 +339,10 @@ void WinLibUSBTransport::ProcessPendingDevices()
                     break;
                 } else if (ret != 0) {
                     log(ASTRA_LOG_LEVEL_DEBUG) << "Device: " << usbPath << " open reported error: " << ret << endLog;
+                    continue;
+                }
+
+                if (handle == nullptr) {
                     continue;
                 }
 
