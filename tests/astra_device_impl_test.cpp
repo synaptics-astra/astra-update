@@ -465,8 +465,14 @@ int main(int argc, char **argv)
         REQUIRE(!probe.Running());
         REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
         REQUIRE(probe.Sent() == std::vector<std::pair<std::string, bool>>({{"final.img", true}}));
-        REQUIRE(StatusSequence(probe.Statuses()) == std::vector<AstraDeviceStatus>({
-            ASTRA_DEVICE_STATUS_IMAGE_SEND_START, ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE}));
+        const auto statuses = probe.Statuses();
+        REQUIRE(StatusSequence(statuses) == std::vector<AstraDeviceStatus>({
+            ASTRA_DEVICE_STATUS_IMAGE_SEND_START, ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE,
+            ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE}));
+        REQUIRE(statuses[2].m_deviceName == "probe-device");
+        REQUIRE(statuses[2].m_imageName == "final.img");
+        REQUIRE(statuses[2].m_progress == 0);
+        REQUIRE(statuses[2].m_message == "Device processing final.img");
         probe.Close();
     });
     suite.Add("size-request-handshake-gates-update-completion", [] {
