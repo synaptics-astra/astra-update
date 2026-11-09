@@ -286,6 +286,14 @@ void AstraDeviceImpl::RunImageRequestLoop()
 
             Image &image = *it;
 
+            if (!m_bootOnly && image.GetImageType() != ASTRA_IMAGE_TYPE_BOOT &&
+                (m_status == ASTRA_DEVICE_STATUS_BOOT_START ||
+                 m_status == ASTRA_DEVICE_STATUS_BOOT_PROGRESS ||
+                 m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE)) {
+                m_status = ASTRA_DEVICE_STATUS_UPDATE_START;
+                ReportStatus(m_status, 0, image.GetName(), "Starting update image transfer");
+            }
+
             if (m_status == ASTRA_DEVICE_STATUS_BOOT_START) {
                 m_status = ASTRA_DEVICE_STATUS_BOOT_PROGRESS;
             } else if (m_status == ASTRA_DEVICE_STATUS_UPDATE_START) {
@@ -331,6 +339,10 @@ void AstraDeviceImpl::RunImageRequestLoop()
 
             if (!ShouldSuppressImageStatus(image.GetName())) {
                 ReportStatus(ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE, 100, image.GetName());
+                if (!m_bootOnly && m_status == ASTRA_DEVICE_STATUS_UPDATE_PROGRESS) {
+                    ReportStatus(ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE, 0, image.GetName(),
+                        "Device processing " + image.GetName());
+                }
             }
 
             OnImageSent(image, true);

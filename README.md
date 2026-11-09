@@ -23,6 +23,26 @@ Astra Update creates a temp directory to store logs and supporting files which a
 
 If the tool created the directory in the system default path, then it will delete it when the tool exits successfully. If the tool detects an error it will print the path of the directory and retain. The log file inside will contain additional information about the error. If the temp directory is specified on the command line then the tool will not automatically delete it.
 
+## Library Update Events
+
+SL16XX and SL26XX report `ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE` when an image
+transfer finishes, not when it has been written to storage. During updates, each
+visible image-transfer completion is followed by
+`ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE`. Its `m_deviceName`, `m_imageName`, and
+`m_message` identify the device, image, and reason for waiting. The wait is
+indeterminate; `m_progress` is not a flash-write percentage, and the event does
+not change the internal update lifecycle state.
+
+Clients can show an activity indicator until the next `IMAGE_SEND_START`, update
+completion, failure, or device closure. SL16XX's internal size-request handshake
+does not emit visible transfer events. SL26XX also reports `WAITING_FOR_DEVICE`
+with an empty image name during its final flash/reboot wait. These events do not
+claim that the protocol can distinguish individual erase and write phases.
+
+Configure with `-DASTRA_BUILD_TESTS=ON`, build `astra-device-events-test`, and run
+`ctest --test-dir build -C Debug -R astra-device-events --output-on-failure` to
+check the shared event sequence without hardware.
+
 ## Usage
 
 The ``astra-update`` tool is a command line utility used for updating the internal storage on Astra Machina. This section discusses the modes and command line parameters which it supports.
