@@ -558,8 +558,8 @@ private:
     {
         ASTRA_LOG;
 
-        ReportStatus(ASTRA_DEVICE_STATUS_UPDATE_PROGRESS, 100, "",
-            "Image transfer complete; device is writing to flash, do not power off or disconnect");
+        ReportStatus(ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE, 0, "",
+            "Device processing final image");
 
         std::string usbPath;
         {
