@@ -385,13 +385,7 @@ void LibUSBDevice::Close()
 
     m_writeCompleteCV.notify_all();
 
-    // Stop callback thread
-    if (m_callbackThreadRunning.exchange(false)) {
-        m_callbackQueueCV.notify_all();
-        if (m_callbackThread.joinable()) {
-            m_callbackThread.join();
-        }
-    }
+    StopCallbackWorker();
 
     std::lock_guard<std::mutex> lock(m_closeMutex);
     if (!m_shutdown.exchange(true))

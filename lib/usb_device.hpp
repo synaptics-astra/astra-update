@@ -78,6 +78,7 @@ protected:
     std::condition_variable m_callbackQueueCV;
     std::thread m_callbackThread;
     std::atomic<bool> m_callbackThreadRunning{false};
+    std::mutex m_callbackWorkerMutex;
 
     // Transfer cancellation tracking
     std::atomic<bool> m_inputInterruptCancelled{false};
@@ -95,6 +96,7 @@ protected:
     // the resources an action may touch, so a queued action never outlives
     // them.
     void QueueCallbackAction(std::function<void()> action);
+    void StopCallbackWorker();
 
     void CallbackWorkerThread();
 };

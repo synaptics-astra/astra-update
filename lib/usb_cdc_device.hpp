@@ -30,8 +30,6 @@ public:
     int WriteInterruptData(const uint8_t *data, size_t size) override;
 
 protected:
-    void StopCallbackWorker();
-
     std::thread m_readerThread;
     uint16_t m_vendorId;
     uint16_t m_productId;

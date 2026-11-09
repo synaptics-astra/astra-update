@@ -21,5 +21,15 @@ endif()
 
 include_directories(include)
 
+include(CTest)
+option(ASTRA_ENABLE_COVERAGE "Instrument project library and unit tests for gcov coverage" OFF)
+if(ASTRA_ENABLE_COVERAGE AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(FATAL_ERROR "ASTRA_ENABLE_COVERAGE requires GCC and gcov")
+endif()
+
 add_subdirectory(lib)
 add_subdirectory(src)
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

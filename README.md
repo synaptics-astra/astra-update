@@ -208,6 +208,18 @@ For Apple Silicon based Macs:
 > **Note:** The build system does not currently support building
 Universal Binaries for Mac OS.
 
+### Running Tests
+
+CTest unit tests are enabled by default and can be disabled with ``-DBUILD_TESTING=OFF``. They use temporary fixtures and simulated USB devices; tests do not access USB hardware. To build and run all suites:
+
+```bash
+    cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
+    cmake --build build --config Debug --target unit-tests
+    ctest --test-dir build -C Debug -L unit --output-on-failure
+```
+
+Use ``Release`` instead of ``Debug`` to validate optimized builds. Each test executable supports ``--list`` and an exact case name. The original ``boot-image-collection-test`` target and CTest name remain available. See [the test guide](tests/README.md) for the behavior matrix, coverage commands, platform limitations, and remaining test gaps.
+
 ## Manifest Files
 
 The ``manifest.yaml`` files are used to describe boot and update images and help Astra Update determine which boot image to use for a specific update image. 
