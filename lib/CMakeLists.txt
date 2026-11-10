@@ -11,6 +11,7 @@ ExternalProject_Add(libusb
     GIT_TAG v1.0.26
     PREFIX ${CMAKE_BINARY_DIR}/libusb
     CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
+               -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/libusb
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
@@ -25,6 +26,7 @@ ExternalProject_Add(yaml-cpp
     PATCH_COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_BINARY_DIR}/yaml-cpp/src/yaml-cpp 
                                    -P ${CMAKE_SOURCE_DIR}/cmake/yaml-cpp-cstdint.cmake
     CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
+               -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/yaml-cpp
                -DYAML_CPP_BUILD_TESTS=OFF
                -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
@@ -65,6 +67,7 @@ else()
 endif()
 
 add_library(astraupdate STATIC ${SRC})
+set_target_properties(astraupdate PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_dependencies(astraupdate yaml-cpp)
 add_dependencies(astraupdate libusb)
@@ -89,3 +92,41 @@ if(ASTRA_ENABLE_COVERAGE)
     target_compile_options(astraupdate PRIVATE --coverage -O0 -g)
     target_link_libraries(astraupdate INTERFACE --coverage)
 endif()
+
+# Python bindings with pybind11
+if(ASTRA_BUILD_PYTHON_BINDINGS)
+if(CMAKE_VERSION VERSION_LESS "3.18")
+    message(FATAL_ERROR "Python bindings require CMake 3.18 or newer")
+endif()
+FetchContent_Declare(pybind11
+    GIT_REPOSITORY https://github.com/pybind/pybind11.git
+    GIT_TAG v3.0.2
+)
+set(PYBIND11_FINDPYTHON ON)
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+FetchContent_MakeAvailable(pybind11)
+
+# Build Python extension module (_astra_update follows the common
+# underscore-prefixed naming convention for native extension modules).
+pybind11_add_module(_astra_update astra_update_py.cpp)
+
+# Link the static library to the Python module
+target_link_libraries(_astra_update PRIVATE astraupdate)
+
+# Add dependency to ensure astraupdate is built first
+add_dependencies(_astra_update astraupdate)
+
+# Include directories needed for the Python module
+target_include_directories(_astra_update PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(_astra_update PRIVATE ${CMAKE_SOURCE_DIR}/lib)
+target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/include)
+target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/libusb/include)
+
+# Copy the built extension into the package source tree. This enables
+# pip-based installs from the repository root after the CMake build step.
+add_custom_command(TARGET _astra_update POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:_astra_update>
+        ${CMAKE_SOURCE_DIR}/python/astra_update/$<TARGET_FILE_NAME:_astra_update>
+)
+    endif()

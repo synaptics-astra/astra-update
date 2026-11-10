@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 project(astra-update)
 
+option(ASTRA_BUILD_PYTHON_BINDINGS "Build the Python extension" OFF)
+
 # Detect platform and include corresponding CMake file
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     message(STATUS "Building on macOS")
