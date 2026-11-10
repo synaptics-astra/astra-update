@@ -19,6 +19,7 @@ public:
     std::vector<std::tuple<uint16_t, uint16_t>> GetDeviceIDs() const;
     AstraBootImage &GetBootImage(std::string id) const;
 
+    // memoryLayout is the target capacity; boot layouts no larger than it are eligible.
     std::vector<std::shared_ptr<AstraBootImage>> GetBootImagesForChip(std::string chipName,
         AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType,
         std::string boardName) const;
