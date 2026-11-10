@@ -31,6 +31,10 @@ but SPI updates reject an image marked ``xspi_support: false``. Customers can
 keep otherwise matching eMMC and XSPI USB boot images in one collection by marking
 them ``false`` and ``true``, respectively, without specifying a boot-image ID.
 
+When using [generate_boot_manifest.py](tools/generate_boot_manifest.py), pass
+``--xspi_support true`` or ``--xspi_support false`` to emit this field.
+If the option is not supplied, the field is omitted for legacy compatibility.
+
 ### The Temp Directory
 
 Astra Update creates a temp directory to store logs and supporting files which are used during the boot and update processes. By default, the temp directory will be created in the system default temp directory (``/tmp`` on Linux and Mac OS, ``C:\Users\<Username>\AppData\Local\Temp\`` on Windows). The temp directory contains the ``astradevicemanager.log`` file containing all logs for the execution of the process. The directory also contains device specific sub-directories which contains supporting data for each Astra device detected. The path of the temp directory can also be specified on the command line.
