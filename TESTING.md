@@ -75,16 +75,20 @@ Tests that verify the C++ module can be imported and used:
 - **Instantiation Tests**: Create objects with default and custom arguments
 - **Method Tests**: Call methods and check return values
 - **Enum Tests**: Verify all enum values are accessible
+- **Current API parity**: Compare device-status and log-level enums and the
+  runtime version against native headers; verify XSPI `True`/`False`/`None`
+  metadata, series-specific flash completion commands, wait-event forwarding,
+  and connection-open failure handling in the boot CLI.
 
 **Status**: ✓ Can run without real hardware (mocked callbacks)
 
 **Example Test**:
 ```python
 def test_import_main_module(self):
-    from astra_update import AstraDeviceManager
+    from astra_update import AstraDeviceManager, __version__
     # Verify it's the real C++ module, not a stub
     version = AstraDeviceManager.get_version()
-    assert version == "2.0.4"
+    assert version == __version__
 ```
 
 #### 2. Response Handler Tests (`test_response_handler.py`)

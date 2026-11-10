@@ -81,6 +81,33 @@ class TestResponseHandler:
         except ImportError as e:
             pytest.skip(f"ResponseHandler not available: {e}")
 
+    @pytest.mark.parametrize("status_name", ["OPEN_FAIL", "WAITING_FOR_DEVICE"])
+    def test_current_native_events_reach_callbacks_unchanged(self, status_name):
+        from astra_update import DeviceManagerResponse, DeviceResponse, DeviceStatus
+        from astra_update.response_handler import ResponseHandler, EventType
+
+        response = DeviceResponse()
+        response.device_name = "test-device"
+        response.status = getattr(DeviceStatus, status_name)
+        response.progress = 0
+        response.image_name = "final.img"
+        response.message = "Device processing final.img"
+        manager = Mock()
+        manager.get_responses.return_value = [DeviceManagerResponse(response)]
+        handler = ResponseHandler(manager)
+        callback = Mock()
+        handler.register_callback(EventType.DEVICE_EVENT, callback)
+
+        events = handler.poll_responses()
+        assert len(events) == 1
+        callback.assert_called_once_with(events[0])
+        received = events[0].get_device_response()
+        assert received.status == response.status
+        assert received.device_name == response.device_name
+        assert received.image_name == response.image_name
+        assert received.message == response.message
+        assert received.progress == 0
+
     def test_create_response_handler(self):
         """Test creating ResponseHandler."""
         try:

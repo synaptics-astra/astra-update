@@ -158,6 +158,23 @@ with the library's load diagnostic on failure. When using
 Flash images expose metadata getters, `get_load_error()`, and U-Boot version
 selection through `UbootVersion` and `set_uboot_version()`.
 
+`AstraBootImage.get_xspi_support()` returns `True` or `False` when the boot
+manifest explicitly declares `xspi_support`, and `None` when it is omitted.
+`mgr.update()` uses the current native selection rules: boot memory must be
+no larger than target memory; SPI updates prefer XSPI support and exclude
+explicitly unsupported images, while other updates prefer non-XSPI/legacy
+images. Unspecified XSPI support retains legacy compatibility.
+
+All native device statuses are exposed, including `DeviceStatus.OPEN_FAIL`
+and `DeviceStatus.WAITING_FOR_DEVICE`. A wait is informational, not completion
+or a flash-write percentage; its message/image fields describe the pending work.
+The response handler forwards these fields unchanged. The Python boot CLI
+reports connection-open failures and honors `--exit-on-error` in continuous mode.
+
+`LogLevel.TRACE` and `LogLevel.NONE` are available alongside the other native
+log levels. `AstraDevice.get_flash_completion_command(DeviceSeries.SL26XX)`
+exposes the native, series-specific flash-command tail.
+
 #### Response Handling with Callbacks
 
 ```python

@@ -10,6 +10,7 @@ These tests verify that:
 
 import pytest
 import sys
+import re
 from pathlib import Path
 
 # Add python to path for imports
@@ -64,18 +65,35 @@ class TestBindingsImport:
         except ImportError as e:
             pytest.skip(f"Bindings not available: {e}")
 
+    @pytest.mark.parametrize("header,enum_name,prefix,binding_name", [
+        ("astra_device.hpp", "AstraDeviceStatus", "ASTRA_DEVICE_STATUS_", "DeviceStatus"),
+        ("astra_log.hpp", "AstraLogLevel", "ASTRA_LOG_LEVEL_", "LogLevel"),
+    ])
+    def test_enum_parity_with_native_headers(self, header, enum_name, prefix, binding_name):
+        import astra_update
+
+        source = (Path(__file__).parent.parent / "include" / header).read_text()
+        body = re.search(rf"enum {enum_name}\s*\{{([^}}]+)\}}", source).group(1)
+        expected = re.findall(rf"\b{prefix}([A-Z_]+)\b", body)
+        binding = getattr(astra_update, binding_name)
+        assert set(binding.__members__) == set(expected)
+        for value, name in enumerate(expected):
+            assert int(getattr(binding, name)) == value
+
 
 class TestDeviceManagerInstantiation:
     """Test AstraDeviceManager instantiation."""
 
     def test_current_manager_options(self):
-        from astra_update import AstraDeviceManager
+        from astra_update import AstraDeviceManager, __version__
 
         mgr = AstraDeviceManager(
             keep_image_request_loop_after_boot=True,
             leave_fastboot_idle=True,
         )
-        assert mgr.get_version() == "2.0.4"
+        header = (Path(__file__).parent.parent / "include" / "astra_device_manager.hpp").read_text()
+        version = re.search(r'#define ASTRA_DEVICE_MANAGER_VERSION "([^"]+)"', header).group(1)
+        assert mgr.get_version() == __version__ == version
         assert mgr.shutdown() is False
 
     def test_create_device_manager_defaults(self):
@@ -120,6 +138,43 @@ class TestDeviceManagerInstantiation:
 
 
 class TestBootTool:
+    @pytest.mark.parametrize("status_name", ["OPEN_FAIL", "BOOT_FAIL"])
+    @pytest.mark.parametrize("exit_on_error", [False, True])
+    def test_failure_statuses_obey_exit_on_error(self, monkeypatch, capsys, status_name, exit_on_error):
+        from unittest.mock import Mock
+        import astra_update.boot as boot
+        from astra_update import DeviceManagerResponse, DeviceResponse, DeviceStatus, Event
+
+        monkeypatch.setattr(boot, "AstraDeviceManager", Mock())
+        tool = boot.AstraBootTool("images", continuous=True, exit_on_error=exit_on_error)
+        response = DeviceResponse()
+        response.device_name = "test-device"
+        response.status = getattr(DeviceStatus, status_name)
+        response.message = "test failure"
+        tool._handle_device_event(Event.from_response(DeviceManagerResponse(response)))
+        assert tool.running is not exit_on_error
+        error = capsys.readouterr().err
+        assert ("Connection failed" if status_name == "OPEN_FAIL" else "Boot failed") in error
+        assert "test-device: test failure" in error
+
+    def test_wait_event_is_informational(self, monkeypatch, capsys):
+        from unittest.mock import Mock
+        import astra_update.boot as boot
+        from astra_update import DeviceManagerResponse, DeviceResponse, DeviceStatus, Event
+
+        monkeypatch.setattr(boot, "AstraDeviceManager", Mock())
+        tool = boot.AstraBootTool("images")
+        response = DeviceResponse()
+        response.device_name = "test-device"
+        response.status = DeviceStatus.WAITING_FOR_DEVICE
+        response.message = "Device processing final image"
+        tool._handle_device_event(Event.from_response(DeviceManagerResponse(response)))
+        assert tool.running
+        assert tool.progress_bars == {}
+        output = capsys.readouterr()
+        assert "Waiting for test-device: Device processing final image" in output.out
+        assert output.err == ""
+
     def test_current_options_are_forwarded(self, monkeypatch):
         from unittest.mock import Mock
         import astra_update.boot as astra_update_boot
@@ -283,7 +338,8 @@ class TestFlashImageLoading:
         assert flash_image.load() == 0
         assert flash_image.get_size() == len(b"firmware")
 
-    def test_native_boot_image_getters(self, tmp_path):
+    @pytest.mark.parametrize("xspi_support", [None, False, True])
+    def test_native_boot_image_getters(self, tmp_path, xspi_support):
         from astra_update import (
             AstraBootImage,
             DeviceBootStage,
@@ -296,7 +352,7 @@ class TestFlashImageLoading:
             UbootVersion,
         )
 
-        (tmp_path / "manifest.yaml").write_text(
+        manifest = (
             "id: test-boot\n"
             "chip: sl1680\n"
             "board: test-board\n"
@@ -308,9 +364,11 @@ class TestFlashImageLoading:
             "memory_layout: 4gb\n"
             "ddr_type: ddr4\n"
             "uboot: uboot\n"
-            "uboot_version: '2025.01'\n",
-            encoding="utf-8",
+            "uboot_version: '2025.01'\n"
         )
+        if xspi_support is not None:
+            manifest += f"xspi_support: {str(xspi_support).lower()}\n"
+        (tmp_path / "manifest.yaml").write_text(manifest, encoding="utf-8")
         (tmp_path / "bl.bin").write_bytes(b"boot")
 
         boot_image = AstraBootImage(str(tmp_path))
@@ -327,6 +385,7 @@ class TestFlashImageLoading:
         assert boot_image.get_id() == "test-boot"
         assert boot_image.get_uenv_support() is True
         assert boot_image.get_nand_support() is False
+        assert boot_image.get_xspi_support() is xspi_support
         assert boot_image.get_secure_boot_version() == SecureBootVersion.GEN2
         assert boot_image.get_uboot_console() == UbootConsole.UART
         assert boot_image.get_memory_layout() == MemoryLayout.GB_4
@@ -377,6 +436,16 @@ class TestStaticMethods:
             assert len(series_str) > 0
         except ImportError as e:
             pytest.skip(f"Bindings not available: {e}")
+
+    @pytest.mark.parametrize("series,command", [
+        ("SL16XX", "; sleep 1; reset"),
+        ("SL26XX", "; sleep 1; reset"),
+        ("SR1XX", "; sleep 1; reset"),
+    ])
+    def test_flash_completion_command(self, series, command):
+        from astra_update import AstraDevice, DeviceSeries
+
+        assert AstraDevice.get_flash_completion_command(getattr(DeviceSeries, series)) == command
 
 
 class TestResponseQueue:

@@ -64,10 +64,12 @@ PYBIND11_MODULE(_astra_update, m) {
 
     // Enums
     py::enum_<AstraLogLevel>(m, "LogLevel")
+        .value("TRACE", ASTRA_LOG_LEVEL_TRACE)
         .value("DEBUG", ASTRA_LOG_LEVEL_DEBUG)
         .value("INFO", ASTRA_LOG_LEVEL_INFO)
         .value("WARNING", ASTRA_LOG_LEVEL_WARNING)
         .value("ERROR", ASTRA_LOG_LEVEL_ERROR)
+        .value("NONE", ASTRA_LOG_LEVEL_NONE)
         .export_values();
 
     py::enum_<AstraDeviceBootStage>(m, "DeviceBootStage")
@@ -94,6 +96,8 @@ PYBIND11_MODULE(_astra_update, m) {
         .value("IMAGE_SEND_PROGRESS", ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS)
         .value("IMAGE_SEND_COMPLETE", ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE)
         .value("IMAGE_SEND_FAIL", ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL)
+        .value("OPEN_FAIL", ASTRA_DEVICE_STATUS_OPEN_FAIL)
+        .value("WAITING_FOR_DEVICE", ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE)
         .export_values();
 
     py::enum_<AstraDeviceSeries>(m, "DeviceSeries")
@@ -193,7 +197,9 @@ PYBIND11_MODULE(_astra_update, m) {
     py::class_<AstraDevice>(m, "AstraDevice")
         .def_static("status_to_string", &AstraDevice::AstraDeviceStatusToString)
         .def_static("series_to_string", &AstraDevice::AstraDeviceSeriesToString)
-        .def_static("boot_stage_from_string", &AstraDevice::BootStageFromString);
+        .def_static("boot_stage_from_string", &AstraDevice::BootStageFromString)
+        .def_static("get_flash_completion_command", &AstraDevice::GetFlashCompletionCommand,
+            py::arg("series"));
 
     // AstraDeviceManager class
     py::class_<AstraDeviceManager, std::shared_ptr<AstraDeviceManager>>(m, "AstraDeviceManager")
@@ -303,6 +309,8 @@ PYBIND11_MODULE(_astra_update, m) {
         .def("get_id", &AstraBootImage::GetID)
         .def("get_uenv_support", &AstraBootImage::GetUEnvSupport)
         .def("get_nand_support", &AstraBootImage::GetNandSupport)
+        .def("get_xspi_support", &AstraBootImage::GetXspiSupport,
+            "Return True/False for explicit XSPI support, or None when unspecified")
         .def("get_secure_boot_version", &AstraBootImage::GetSecureBootVersion)
         .def("get_uboot_console", &AstraBootImage::GetUbootConsole)
         .def("get_memory_layout", &AstraBootImage::GetMemoryLayout)

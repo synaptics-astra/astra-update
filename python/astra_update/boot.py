@@ -204,11 +204,14 @@ class AstraBootTool:
             print(f"[DEVICE] Booting: {device_name}")
         elif status == DeviceStatus.BOOT_COMPLETE:
             print(f"[DEVICE] Boot complete: {device_name}")
-        elif status == DeviceStatus.BOOT_FAIL:
-            print(f"[ERROR] Boot failed for {device_name}: {message}",
+        elif status in (DeviceStatus.OPEN_FAIL, DeviceStatus.BOOT_FAIL):
+            reason = "Connection failed" if status == DeviceStatus.OPEN_FAIL else "Boot failed"
+            print(f"[ERROR] {reason} for {device_name}: {message}",
                   file=sys.stderr)
             if self.continuous and self.exit_on_error:
                 self.running = False
+        elif status == DeviceStatus.WAITING_FOR_DEVICE:
+            print(f"[DEVICE] Waiting for {device_name}: {message}")
         elif status in (DeviceStatus.IMAGE_SEND_START,
                        DeviceStatus.IMAGE_SEND_PROGRESS,
                        DeviceStatus.IMAGE_SEND_COMPLETE):
