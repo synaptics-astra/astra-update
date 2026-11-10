@@ -10,8 +10,10 @@ captured by fakes, never sent to real devices.
 ## Running
 
 The manifest generator CLI regression tests run separately with Python's
-standard library: `python tests/test_generate_boot_manifest.py`. They cover
-explicit XSPI true/false, omission for legacy compatibility, and invalid input.
+standard library: `python tests/test_generate_manifest.py`. They cover
+explicit XSPI true/false, omission for legacy compatibility, SPI/eMMC/NAND
+manifest shapes, SDK metadata and CLI precedence, reset/boot-ID overrides,
+payload validation, and missing/invalid input.
 
 From the repository root:
 
