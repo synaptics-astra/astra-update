@@ -10,6 +10,20 @@
 
 namespace {
 
+constexpr test::LayoutCase orderedLayouts[] = {
+    {"512mb", ASTRA_MEMORY_LAYOUT_512MB}, {"1gb", ASTRA_MEMORY_LAYOUT_1GB},
+    {"2gb", ASTRA_MEMORY_LAYOUT_2GB}, {"3gb", ASTRA_MEMORY_LAYOUT_3GB},
+    {"4gb", ASTRA_MEMORY_LAYOUT_4GB}
+};
+
+size_t LayoutRank(AstraMemoryLayout layout)
+{
+    const auto found = std::find_if(std::begin(orderedLayouts), std::end(orderedLayouts),
+        [layout](const test::LayoutCase &entry) { return entry.value == layout; });
+    REQUIRE(found != std::end(orderedLayouts));
+    return static_cast<size_t>(found - std::begin(orderedLayouts));
+}
+
 class MatchingFixture
 {
 public:
@@ -258,8 +272,11 @@ int main(int argc, char **argv)
                         version == ASTRA_SECURE_BOOT_V2 ? ASTRA_SECURE_BOOT_V3 : ASTRA_SECURE_BOOT_V2,
                         layout.value, ddr.value, "rdk").empty());
                     for (const auto other : test::layouts) {
-                        if (other.value != layout.value) {
-                            REQUIRE(collection.GetBootImagesForChip("sl2619", version, other.value, ddr.value, "rdk").empty());
+                        const auto compatible = collection.GetBootImagesForChip("sl2619", version,
+                            other.value, ddr.value, "rdk");
+                        REQUIRE(compatible.size() == (LayoutRank(layout.value) <= LayoutRank(other.value) ? 1u : 0u));
+                        if (!compatible.empty()) {
+                            REQUIRE(compatible.front()->GetID() == "exact");
                         }
                     }
                     for (const auto other : test::ddrTypes) {
@@ -291,5 +308,56 @@ int main(int argc, char **argv)
             REQUIRE(matches.front()->GetID() == "fallback");
         });
     }
+    for (const auto target : orderedLayouts) {
+        suite.Add(std::string("compatible-memory-layouts-") + target.name, [=] {
+            for (const std::string bootChip : {"sl2619", "sl2610"}) {
+                test::TempDirectory directory;
+                for (const auto boot : orderedLayouts) {
+                    auto fields = test::BootManifest(boot.name);
+                    fields["chip"] = bootChip;
+                    fields["memory_layout"] = boot.name;
+                    test::WriteBootManifest(directory, fields, boot.name);
+                }
+                BootImageCollection collection(directory.Path().string());
+                collection.Load();
+                const auto matches = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+                    target.value, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk");
+                std::set<std::string> actual;
+                for (const auto &image : matches) {
+                    actual.insert(image->GetID());
+                }
+                std::set<std::string> expected;
+                for (const auto boot : orderedLayouts) {
+                    if (LayoutRank(boot.value) <= LayoutRank(target.value)) {
+                        expected.insert(boot.name);
+                    }
+                }
+                REQUIRE(actual == expected);
+                REQUIRE(matches.size() == expected.size());
+            }
+        });
+    }
+    suite.Add("smaller-exact-chip-retains-priority-over-exact-memory-fallback", [] {
+        test::TempDirectory directory;
+        auto exact = test::BootManifest("small-exact-chip");
+        exact["memory_layout"] = "512mb";
+        test::WriteBootManifest(directory, exact, "exact");
+        auto fallback = test::BootManifest("large-fallback-chip");
+        fallback["chip"] = "sl2610";
+        test::WriteBootManifest(directory, fallback, "fallback");
+        BootImageCollection collection(directory.Path().string());
+        collection.Load();
+        const auto matches = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+            ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk");
+        REQUIRE(matches.size() == 1);
+        REQUIRE(matches.front()->GetID() == "small-exact-chip");
+    });
+    suite.Add("invalid-target-memory-layout-is-rejected", [] {
+        test::TempDirectory directory;
+        BootImageCollection collection(directory.Path().string());
+        REQUIRE_THROWS(std::invalid_argument, collection.GetBootImagesForChip("sl2619",
+            ASTRA_SECURE_BOOT_V3, static_cast<AstraMemoryLayout>(-1),
+            ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk"));
+    });
     return suite.Run(argc, argv);
 }

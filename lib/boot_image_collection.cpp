@@ -3,10 +3,27 @@
 
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include "boot_image_collection.hpp"
 #include "astra_boot_image.hpp"
 #include "image.hpp"
 #include "astra_log.hpp"
+
+namespace {
+
+unsigned int MemoryLayoutMegabytes(AstraMemoryLayout layout)
+{
+    switch (layout) {
+    case ASTRA_MEMORY_LAYOUT_512MB: return 512;
+    case ASTRA_MEMORY_LAYOUT_1GB: return 1024;
+    case ASTRA_MEMORY_LAYOUT_2GB: return 2048;
+    case ASTRA_MEMORY_LAYOUT_3GB: return 3072;
+    case ASTRA_MEMORY_LAYOUT_4GB: return 4096;
+    default: throw std::invalid_argument("Invalid memory layout for boot image selection");
+    }
+}
+
+}
 
 void BootImageCollection::LoadBootImage(const std::filesystem::path &path)
 {
@@ -75,6 +92,8 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
 {
     ASTRA_LOG;
 
+    const auto targetMemoryMegabytes = MemoryLayoutMegabytes(memoryLayout);
+
     // For SL261x variants (where x > 0), collect candidate chip names: exact match first, then series fallback.
     std::vector<std::string> chipNamesToTry = { chipName };
     if (chipName.size() == 6 && chipName.compare(0, 5, "sl261") == 0 && chipName[5] > '0') {
@@ -86,7 +105,7 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
     for (const auto& candidateChipName : chipNamesToTry) {
         for (const auto& bootImage : m_bootImages) {
             if (bootImage->GetChipName() == candidateChipName && bootImage->GetSecureBootVersion() == secureBoot
-              && bootImage->GetMemoryLayout() == memoryLayout)
+              && MemoryLayoutMegabytes(bootImage->GetMemoryLayout()) <= targetMemoryMegabytes)
             {
                 const bool boardImageMatch = boardName.empty() || boardName == "any"
                     || bootImage->GetBoardName() == boardName;
