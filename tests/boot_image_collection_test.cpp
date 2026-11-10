@@ -136,12 +136,121 @@ void AddMatchingRegressions(test::Suite &suite)
     });
 }
 
+void AddXspiRegressions(test::Suite &suite)
+{
+    for (const auto type : {FLASH_IMAGE_TYPE_SPI, FLASH_IMAGE_TYPE_EMMC, FLASH_IMAGE_TYPE_NAND}) {
+        for (unsigned int mask = 1; mask < 8; ++mask) {
+            suite.Add("xspi-selection-" + std::to_string(type) + "-" + std::to_string(mask), [=] {
+                test::TempDirectory directory;
+                const std::vector<std::string> ids{"legacy", "non-xspi", "xspi"};
+                for (size_t i = 0; i < ids.size(); ++i) {
+                    if ((mask & (1u << i)) == 0) {
+                        continue;
+                    }
+                    auto fields = test::BootManifest(ids[i]);
+                    fields["nand_support"] = "true";
+                    if (i != 0) {
+                        fields["xspi_support"] = i == 2 ? "true" : "false";
+                    }
+                    test::WriteBootManifest(directory, fields, ids[i]);
+                }
+                BootImageCollection collection(directory.Path().string());
+                collection.Load();
+                const auto images = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+                    ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk", type);
+                std::set<std::string> actual;
+                for (const auto &image : images) {
+                    actual.insert(image->GetID());
+                }
+                std::set<std::string> expected;
+                if (type == FLASH_IMAGE_TYPE_SPI) {
+                    if (mask & 4u) {
+                        expected.insert("xspi");
+                    } else if (mask & 1u) {
+                        expected.insert("legacy");
+                    }
+                } else {
+                    if (mask & 1u) {
+                        expected.insert("legacy");
+                    }
+                    if (mask & 2u) {
+                        expected.insert("non-xspi");
+                    }
+                    if (expected.empty()) {
+                        expected.insert("xspi");
+                    }
+                }
+                REQUIRE(actual == expected);
+            });
+        }
+    }
+    suite.Add("xspi-filter-allows-compatible-chip-fallback", [] {
+        test::TempDirectory directory;
+        auto exact = test::BootManifest("exact");
+        exact["xspi_support"] = "false";
+        test::WriteBootManifest(directory, exact, "exact");
+        auto fallback = test::BootManifest("fallback");
+        fallback["chip"] = "sl2610";
+        fallback["xspi_support"] = "true";
+        test::WriteBootManifest(directory, fallback, "fallback");
+        BootImageCollection collection(directory.Path().string());
+        collection.Load();
+        const auto images = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+            ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk", FLASH_IMAGE_TYPE_SPI);
+        REQUIRE(images.size() == 1);
+        REQUIRE(images.front()->GetID() == "fallback");
+    });
+    suite.Add("xspi-preference-preserves-exact-chip-priority", [] {
+        test::TempDirectory directory;
+        test::WriteBootManifest(directory, test::BootManifest("exact"), "exact");
+        auto fallback = test::BootManifest("fallback");
+        fallback["chip"] = "sl2610";
+        fallback["xspi_support"] = "true";
+        test::WriteBootManifest(directory, fallback, "fallback");
+        BootImageCollection collection(directory.Path().string());
+        collection.Load();
+        const auto images = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+            ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk", FLASH_IMAGE_TYPE_SPI);
+        REQUIRE(images.size() == 1);
+        REQUIRE(images.front()->GetID() == "exact");
+    });
+    suite.Add("nand-capability-is-filtered-before-xspi-preference", [] {
+        test::TempDirectory directory;
+        auto nonNand = test::BootManifest("non-nand");
+        nonNand["xspi_support"] = "false";
+        test::WriteBootManifest(directory, nonNand, "non-nand");
+        auto nand = test::BootManifest("nand");
+        nand["xspi_support"] = "true";
+        nand["nand_support"] = "true";
+        test::WriteBootManifest(directory, nand, "nand");
+        BootImageCollection collection(directory.Path().string());
+        collection.Load();
+        const auto images = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+            ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk", FLASH_IMAGE_TYPE_NAND);
+        REQUIRE(images.size() == 1);
+        REQUIRE(images.front()->GetID() == "nand");
+    });
+    suite.Add("chip-query-without-update-type-keeps-all-xspi-variants", [] {
+        test::TempDirectory directory;
+        for (const std::string support : {"true", "false"}) {
+            auto fields = test::BootManifest(support);
+            fields["xspi_support"] = support;
+            test::WriteBootManifest(directory, fields, support);
+        }
+        BootImageCollection collection(directory.Path().string());
+        collection.Load();
+        REQUIRE(collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+            ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk").size() == 2);
+    });
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
     test::Suite suite;
     AddMatchingRegressions(suite);
+    AddXspiRegressions(suite);
     for (const bool overrideBoard : {false, true}) {
         suite.Add(overrideBoard ? "config-any-board-overrides-manifest" : "manifest-any-board", [=] {
             MatchingFixture fixture;

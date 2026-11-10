@@ -6,6 +6,7 @@
 #include <vector>
 #include <memory>
 #include "astra_boot_image.hpp"
+#include "flash_image.hpp"
 
 class BootImageCollection
 {
@@ -20,9 +21,10 @@ public:
     AstraBootImage &GetBootImage(std::string id) const;
 
     // memoryLayout is the target capacity; boot layouts no larger than it are eligible.
+    // Omitting updateType preserves the unranked chip/board query.
     std::vector<std::shared_ptr<AstraBootImage>> GetBootImagesForChip(std::string chipName,
         AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType,
-        std::string boardName) const;
+        std::string boardName, std::optional<FlashImageType> updateType = std::nullopt) const;
 
 private:
     std::string m_path;
