@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
+#include <algorithm>
 #include "boot_image_collection.hpp"
 #include "astra_boot_image.hpp"
 #include "image.hpp"
@@ -88,7 +89,8 @@ AstraBootImage &BootImageCollection::GetBootImage(std::string id) const
 }
 
 std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesForChip(std::string chipName,
-    AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType, std::string boardName) const
+    AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType,
+    std::string boardName, std::optional<FlashImageType> updateType) const
 {
     ASTRA_LOG;
 
@@ -112,7 +114,8 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
                 const bool ddrTypeMatch = memoryDDRType == ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED
                     || bootImage->GetMemoryDDRType() == memoryDDRType;
 
-                if (boardImageMatch && ddrTypeMatch) {
+                const bool xspiMatch = updateType != FLASH_IMAGE_TYPE_SPI || bootImage->GetXspiSupport() != false;
+                if (boardImageMatch && ddrTypeMatch && xspiMatch) {
                     bootImages.push_back(bootImage);
                 }
             }
@@ -120,6 +123,24 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
 
         // If we found matches with the exact chip name, do not try the series fallback.
         if (!bootImages.empty()) {
+            if (updateType == FLASH_IMAGE_TYPE_NAND) {
+                bootImages.erase(std::remove_if(bootImages.begin(), bootImages.end(),
+                    [](const std::shared_ptr<AstraBootImage> &image) { return !image->GetNandSupport(); }),
+                    bootImages.end());
+            }
+            if (updateType.has_value()) {
+                // Unspecified manifests remain usable; prefer explicit XSPI
+                // support for SPI, and false/unspecified for other updates.
+                const auto preferred = [updateType](const std::shared_ptr<AstraBootImage> &image) {
+                    return updateType == FLASH_IMAGE_TYPE_SPI ? image->GetXspiSupport() == true
+                        : image->GetXspiSupport() != true;
+                };
+                if (std::any_of(bootImages.begin(), bootImages.end(), preferred)) {
+                    bootImages.erase(std::remove_if(bootImages.begin(), bootImages.end(),
+                        [&](const std::shared_ptr<AstraBootImage> &image) { return !preferred(image); }),
+                        bootImages.end());
+                }
+            }
             break;
         }
     }

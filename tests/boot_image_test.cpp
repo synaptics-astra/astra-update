@@ -52,10 +52,32 @@ int main(int argc, char **argv)
         REQUIRE(image.GetUbootVariant() == ASTRA_UBOOT_VARIANT_SYNAPTICS);
         REQUIRE(image.GetUbootVersion() == ASTRA_UBOOT_VERSION_2025_01);
         REQUIRE(!image.GetUEnvSupport() && !image.GetNandSupport());
+        REQUIRE(!image.GetXspiSupport().has_value());
         REQUIRE(!image.IsLinuxBoot());
         REQUIRE(image.GetDefaultBootStage() == ASTRA_DEVICE_BOOT_STAGE_AUTO);
         REQUIRE(image.GetFinalBootImage() == "gen3_uboot.bin.usb");
         REQUIRE(image.GetImages().empty());
+    });
+    for (const bool support : {false, true}) {
+        suite.Add(support ? "xspi-support-enabled" : "xspi-support-disabled", [=] {
+            test::TempDirectory directory;
+            auto fields = test::BootManifest();
+            fields["xspi_support"] = support ? "true" : "false";
+            REQUIRE(Load(directory, fields).GetXspiSupport() == support);
+        });
+    }
+    suite.Add("reloading-manifest-clears-xspi-support", [] {
+        test::TempDirectory directory;
+        auto fields = test::BootManifest();
+        fields["xspi_support"] = "true";
+        test::WriteBootManifest(directory, fields);
+        AstraBootImage image(directory.Path().string());
+        REQUIRE(image.Load());
+        REQUIRE(image.GetXspiSupport() == true);
+        fields.erase("xspi_support");
+        test::WriteBootManifest(directory, fields);
+        REQUIRE(image.Load());
+        REQUIRE(!image.GetXspiSupport().has_value());
     });
     for (const auto layout : test::layouts) {
         suite.Add(std::string("layout-") + layout.name, [=] {
@@ -268,7 +290,8 @@ int main(int argc, char **argv)
     }
     const test::Manifest invalidValues = {
         {"memory_layout", "8gb"}, {"transport", "serial"}, {"vendor_id", "invalid"},
-        {"product_id", ""}, {"uenv_support", "maybe"}, {"nand_support", "maybe"}
+        {"product_id", ""}, {"uenv_support", "maybe"}, {"nand_support", "maybe"},
+        {"xspi_support", "maybe"}
     };
     for (const auto &field : invalidValues) {
         suite.Add("invalid-field-" + field.first, [=] {

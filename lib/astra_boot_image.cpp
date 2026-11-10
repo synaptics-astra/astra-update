@@ -31,6 +31,11 @@ bool AstraBootImage::LoadManifest(std::string manifestPath)
             m_nandSupport = manifest["nand_support"].as<bool>();
         }
 
+        m_xspiSupport.reset();
+        if (manifest["xspi_support"]) {
+            m_xspiSupport = manifest["xspi_support"].as<bool>();
+        }
+
         m_sysMgrVendorId = 0;
         m_sysMgrProductId = 0;
         if (manifest["sysmgr_vendor_id"] && manifest["sysmgr_product_id"]) {

@@ -17,6 +17,24 @@ Update images can also contain their own ``manifest.yaml`` file which specifies 
 
 Automatic selection requires matching the chip and secure boot version. The boot image's memory layout must be less than or equal to the update image's target memory layout: for example, a 512mb boot image can serve 512mb, 1gb, or 2gb targets, but a 2gb boot image cannot serve a 1gb target. All compatible memory sizes remain eligible under the existing U-Boot/uEnv/console preferences; exact memory matches are not given extra priority. Use ``--board any`` or ``board: any`` in an update image manifest to explicitly allow any board; a specific board name must match. An omitted or empty board remains unrestricted for backward compatibility. When a DDR type is specified, it must also match; omitting it leaves that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
 
+Boot image manifests can optionally declare ``xspi_support: true`` or
+``xspi_support: false``. For SPI updates, automatic selection excludes explicit
+``false`` and prefers explicit ``true`` over manifests that omit the field.
+For other updates, it prefers ``false`` or omitted over ``true``, but still uses
+an XSPI-capable image if no other compatible image is available. These preferences
+apply before the existing U-Boot/uEnv/console preferences, within the best matching
+chip. NAND updates must still use a NAND-capable image.
+
+Omitting ``xspi_support`` preserves legacy compatibility: unmarked images remain
+usable for all update types. An explicit boot-image ID bypasses the preference,
+but SPI updates reject an image marked ``xspi_support: false``. Customers can
+keep otherwise matching eMMC and XSPI USB boot images in one collection by marking
+them ``false`` and ``true``, respectively, without specifying a boot-image ID.
+
+When using [generate_boot_manifest.py](tools/generate_boot_manifest.py), pass
+``--xspi_support true`` or ``--xspi_support false`` to emit this field.
+If the option is not supplied, the field is omitted for legacy compatibility.
+
 ### The Temp Directory
 
 Astra Update creates a temp directory to store logs and supporting files which are used during the boot and update processes. By default, the temp directory will be created in the system default temp directory (``/tmp`` on Linux and Mac OS, ``C:\Users\<Username>\AppData\Local\Temp\`` on Windows). The temp directory contains the ``astradevicemanager.log`` file containing all logs for the execution of the process. The directory also contains device specific sub-directories which contains supporting data for each Astra device detected. The path of the temp directory can also be specified on the command line.
@@ -285,6 +303,7 @@ Example SL2610 boot image ``manifest.yaml``:
     console: uart
     uenv_support: true
     nand_support: false
+    xspi_support: false
     transport: usb_cdc
     memory_layout: 2gb
     ddr_type: ddr4

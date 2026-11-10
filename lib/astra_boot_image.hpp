@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <optional>
 
 #include "astra_device.hpp"
 #include "image.hpp"
@@ -42,6 +43,7 @@ public:
     std::string GetID() const { return m_id; }
     bool GetUEnvSupport() const { return m_uEnvSupport; }
     bool GetNandSupport() const { return m_nandSupport; }
+    std::optional<bool> GetXspiSupport() const { return m_xspiSupport; }
     AstraSecureBootVersion GetSecureBootVersion() const { return m_secureBootVersion; }
     AstraUbootConsole GetUbootConsole() const { return m_ubootConsole; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
@@ -79,6 +81,7 @@ private:
     bool m_linuxBoot = false;
     AstraDeviceBootStage m_defaultBootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
     bool m_nandSupport = false;
+    std::optional<bool> m_xspiSupport;
 
     bool LoadManifest(std::string manifestPath);
 };
