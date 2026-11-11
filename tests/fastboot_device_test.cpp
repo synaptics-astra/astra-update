@@ -148,11 +148,48 @@ int main(int argc, char **argv)
         test::ScriptedUSBDevice usb;
         FastBootDevice fastboot(&usb);
         REQUIRE(fastboot.OemNoWait("fb_exit"));
-        REQUIRE(fastboot.Reboot());
         REQUIRE(usb.ReadTimeouts().empty());
+        QueueOkay(usb);
+        REQUIRE(fastboot.Reboot(123));
+        REQUIRE(usb.ReadTimeouts() == std::vector<int>({123}));
         const auto writes = usb.Writes();
         REQUIRE(writes.size() == 2);
         REQUIRE(Text(writes[0]) == "oem fb_exit" && Text(writes[1]) == "reboot");
+    });
+    suite.Add("reboot-requires-acknowledgement", [] {
+        for (const std::string response : {"FAILdenied", "OK", ""}) {
+            test::ScriptedUSBDevice usb;
+            usb.QueueRead(response);
+            FastBootDevice fastboot(&usb);
+            REQUIRE(!fastboot.Reboot());
+        }
+    });
+    suite.Add("disconnect-wait-only-reads-and-retries-timeouts", [] {
+        test::ScriptedUSBDevice usb;
+        usb.QueueRead("", 0, -7);
+        usb.QueueRead("INFOresetting");
+        usb.QueueRead("", 0, -4);
+        FastBootDevice fastboot(&usb);
+        REQUIRE(fastboot.WaitForDisconnect(1000));
+        REQUIRE(usb.Writes().empty());
+        REQUIRE(usb.ReadTimeouts().size() == 3);
+    });
+    suite.Add("disconnect-wait-does-not-treat-io-error-as-success", [] {
+        test::ScriptedUSBDevice usb;
+        usb.QueueRead("", 0, -1);
+        FastBootDevice fastboot(&usb);
+        REQUIRE(!fastboot.WaitForDisconnect(1000));
+        REQUIRE(usb.Writes().empty());
+    });
+    suite.Add("disconnect-wait-timeout-and-callback", [] {
+        test::ScriptedUSBDevice usb;
+        FastBootDevice fastboot(&usb);
+        REQUIRE(fastboot.Open());
+        REQUIRE(!fastboot.WaitForDisconnect(0));
+        REQUIRE(usb.ReadTimeouts().empty());
+        usb.Emit(USBDevice::USB_DEVICE_EVENT_NO_DEVICE);
+        REQUIRE(fastboot.WaitForDisconnect(1000));
+        REQUIRE(usb.Writes().empty() && usb.ReadTimeouts().empty());
     });
     suite.Add("oem-and-no-wait-length-limits", [] {
         test::ScriptedUSBDevice usb;

@@ -180,6 +180,7 @@ public:
             return 0;
         }
 
+        m_fastbootReboot = bootImage->GetFastbootReboot();
         m_deviceName = "device:" + m_usbDevice->GetUSBPath();
         int ret = m_usbDevice->Open(std::bind(&AstraDeviceSL26XXImpl::USBEventHandler, this,
             std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
@@ -505,6 +506,7 @@ private:
     std::unique_ptr<FastBootDevice> m_fastbootDevice;
 
     bool m_deviceOpened = false;
+    bool m_fastbootReboot = false;
 
     // Rebind-mode state: armed once the device carries our UUID as serialno.
     // m_rebindReady is set by Rebind() and cleared by WaitForRebind().
@@ -534,6 +536,8 @@ private:
     // is the agreed fallback ceiling so a normal update isn't stuck waiting
     // needlessly long when the real signal is missed.
     static constexpr std::chrono::seconds kPostFlashGracePeriod{300};
+    static constexpr std::chrono::seconds kPostFlashFastbootTimeout{480};
+    static constexpr std::chrono::seconds kRebootDisconnectTimeout{10};
 
     // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
     // arrives on this device's registered USB path.
@@ -552,6 +556,50 @@ private:
         m_finalBootCV.notify_all();
     }
 
+    void WaitForFastbootReboot()
+    {
+        ASTRA_LOG;
+
+        std::string failure;
+        if (!m_rebindArmed.load() && !ArmRebindMode("post-flash fastboot re-entry")) {
+            failure = "Cannot wait for post-flash fastboot re-entry without a registered UUID";
+        } else {
+            bool reenteredFastboot = false;
+            {
+                std::unique_lock<std::mutex> lock(m_rebindMutex);
+                m_rebindCV.wait_for(lock, kPostFlashFastbootTimeout, [this] {
+                    return m_rebindReady.load() || m_shutdown.load() || !m_running.load();
+                });
+                reenteredFastboot = m_rebindReady.exchange(false);
+            }
+
+            if (m_shutdown.load()) {
+                return;
+            }
+            if (!m_running.load()) {
+                failure = "Fastboot connection failed while waiting for post-flash re-entry";
+            } else if (!reenteredFastboot) {
+                failure = "Timeout waiting for post-flash fastboot re-entry";
+            } else {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing, sending reboot" << endLog;
+                std::lock_guard<std::mutex> lock(m_deviceMutex);
+                if (!m_fastbootDevice || !m_fastbootDevice->Reboot()) {
+                    failure = "Device did not acknowledge fastboot reboot";
+                } else if (!m_fastbootDevice->WaitForDisconnect(
+                    static_cast<int>(std::chrono::milliseconds(kRebootDisconnectTimeout).count())))
+                {
+                    failure = "Device did not disconnect after fastboot reboot";
+                }
+            }
+        }
+
+        if (!failure.empty()) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX: " << failure << endLog;
+            m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
+            ReportStatus(m_status, 0, "", failure);
+        }
+    }
+
     // Reports an interim "still writing to flash" status, then waits for
     // either the real post-flash Linux boot gadget (NotifyFinalBootDetected)
     // or kPostFlashGracePeriod to elapse, whichever comes first, before
@@ -562,6 +610,14 @@ private:
 
         ReportStatus(ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE, 0, "",
             "Device processing final image");
+
+        if (m_fastbootReboot && !m_bootOnly && m_resetWhenComplete) {
+            WaitForFastbootReboot();
+            m_rebindArmed.store(false);
+            m_running.store(false);
+            SignalDeviceEvent();
+            return;
+        }
 
         std::string usbPath;
         {
@@ -1445,6 +1501,12 @@ private:
             })) {
             log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: failed to open new device after rebind" << endLog;
             m_fastbootDevice.reset();
+            if (m_fastbootReboot && !m_bootOnly && m_resetWhenComplete &&
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE)
+            {
+                m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
+                ReportStatus(m_status, 0, "", "Failed to open post-flash fastboot device");
+            }
             m_running.store(false);
             SignalDeviceEvent();
             m_rebindCV.notify_all();
@@ -1576,13 +1638,8 @@ private:
                         (m_bootOnly && m_status == ASTRA_DEVICE_STATUS_BOOT_COMPLETE &&
                          !keepBootLoopRunning);
                     if (updateDone) {
-                        // Final fb_exit: wait for the device to actually
-                        // finish flashing and re-enter fastboot (or, for
-                        // older bootcmd/devices that just reset, wait out the
-                        // grace period and complete anyway). Keep rebind
-                        // armed until WaitForFlashWriteToFinish() is done
-                        // with it so the manager can route that reconnect to
-                        // Rebind().
+                        // Keep rebind armed until the selected completion
+                        // path finishes so the manager can route a reconnect.
                         log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX fastboot: update done, waiting for device to finish flashing" << endLog;
                         m_fbExitPending.store(false);
                         WaitForFlashWriteToFinish();
@@ -1764,12 +1821,11 @@ std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USB
         bootCommand, keepImageRequestLoopAfterBoot, leaveFastbootIdle);
 }
 
-std::string GetSL26XXFlashCompletionCommand()
+std::string GetSL26XXFlashCompletionCommand(bool fastbootReboot)
 {
-    // Reverted: appending a fastboot-reentry command here (instead of a
-    // plain reset) caused a 100% reproducible on-device "img2sd"/"burn
-    // failed" error while writing the final image. Back to a plain reset
-    // until the root cause on the device side is understood.
+    if (fastbootReboot) {
+        return "; sleep 1; fastboot -l 0x10000000 -s 0x8000000 usb 0";
+    }
     return "; sleep 1; reset";
 }
 

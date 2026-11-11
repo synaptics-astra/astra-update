@@ -4,6 +4,7 @@
 #include "fastboot_device.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -361,13 +362,45 @@ bool FastBootDevice::OemNoWait(const std::string &command)
     return ok;
 }
 
-bool FastBootDevice::Reboot()
+bool FastBootDevice::Reboot(int timeoutMs)
 {
     ASTRA_LOG;
 
-    const bool ok = SendCommand("reboot");
-    if (!ok) {
-        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot send failed" << endLog;
+    // U-Boot does not reset until the host reads the OKAY reply.
+    uint32_t unused = 0;
+    const std::string result = ExecuteCommand("reboot", unused, timeoutMs);
+    if (result != "OKAY") {
+        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot not acknowledged (result=" << result << ")" << endLog;
+        return false;
     }
-    return ok;
+    return true;
+}
+
+bool FastBootDevice::WaitForDisconnect(int timeoutMs)
+{
+    ASTRA_LOG;
+
+    // libusb error values; including libusb.h here pulls in windows.h.
+    constexpr int kNoDevice = -4;
+    constexpr int kTimeout = -7;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (m_disconnected.load()) {
+            return true;
+        }
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now()).count();
+        uint8_t buf[kRespBufferSize] = {};
+        int received = 0;
+        const int ret = m_usbDevice->ReadBulk(buf, sizeof(buf), &received,
+            static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(250, remaining))));
+        if (ret == kNoDevice || m_disconnected.load()) {
+            return true;
+        }
+        if (ret < 0 && ret != kTimeout) {
+            log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: disconnect read failed (ret=" << ret << ")" << endLog;
+            return false;
+        }
+    }
+    return m_disconnected.load();
 }

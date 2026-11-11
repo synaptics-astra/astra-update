@@ -25,10 +25,10 @@ AstraDevice::AstraDevice(std::unique_ptr<USBDevice> device, const std::string &t
 
 AstraDevice::~AstraDevice() = default;
 
-std::string AstraDevice::GetFlashCompletionCommand(AstraDeviceSeries series)
+std::string AstraDevice::GetFlashCompletionCommand(AstraDeviceSeries series, bool fastbootReboot)
 {
     if (series == ASTRA_SERIES_SL26XX) {
-        return GetSL26XXFlashCompletionCommand();
+        return GetSL26XXFlashCompletionCommand(fastbootReboot);
     }
     return GetSL16XXFlashCompletionCommand();
 }

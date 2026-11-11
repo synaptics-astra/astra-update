@@ -193,6 +193,30 @@ class GenerateManifestTests(unittest.TestCase):
             self.assertIn('invalid choice', result.stderr)
             self.assertFalse(output.exists())
 
+    def test_fastboot_reboot_default_and_overrides(self):
+        for value in (None, 'true', 'false'):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'manifest.yaml'
+                options = ['--fastboot_reboot', value] if value is not None else []
+                result = subprocess.run([
+                    sys.executable, str(GENERATOR), '--chip', 'sl2619',
+                    '--secure_boot', 'genx', '--output', str(output), *options,
+                ], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                fields = dict(line.split(': ', 1) for line in output.read_text().splitlines())
+                self.assertEqual(fields['fastboot_reboot'], value or 'true')
+
+    def test_invalid_fastboot_reboot_does_not_write_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'manifest.yaml'
+            result = subprocess.run([
+                sys.executable, str(GENERATOR), '--fastboot_reboot', 'maybe',
+                '--output', str(output),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('--fastboot_reboot', result.stderr)
+            self.assertFalse(output.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

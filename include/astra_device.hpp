@@ -101,8 +101,9 @@ public:
 
     // The U-Boot command tail appended after a flash command completes
     // (e.g. reset, or re-enter fastboot) is device-specific: each series
-    // knows what its own bootloader supports.
-    static std::string GetFlashCompletionCommand(AstraDeviceSeries series);
+    // knows what its own bootloader supports. SL26XX fastboot re-entry
+    // requires an explicit capability flag; legacy callers retain reset.
+    static std::string GetFlashCompletionCommand(AstraDeviceSeries series, bool fastbootReboot = false);
 
 private:
     std::unique_ptr<AstraDeviceImpl> pImpl;

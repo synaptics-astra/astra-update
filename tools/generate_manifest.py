@@ -130,6 +130,9 @@ def main():
     parser.add_argument('--nand_support', default=None, help='Whether NAND boot is supported (true/false)')
     parser.add_argument('--xspi_support', choices=('true', 'false'), default=None,
                         help='Whether XSPI flash updates are supported (true/false); omitted if unspecified')
+    parser.add_argument('--fastboot_reboot', choices=('true', 'false'), default='true',
+                        help='Re-enter fastboot after flashing for host-controlled reboot '
+                             '(default: true); set false for older U-Boot builds')
     parser.add_argument('--transport', default=None, help='Boot image transport type (usb or usb_cdc)')
     parser.add_argument('--memory_layout')
     parser.add_argument('--ddr-type')
@@ -273,6 +276,8 @@ uboot_version: \"{uboot_version}\"
 
     if args.xspi_support is not None:
         yaml_content += f"xspi_support: {args.xspi_support}\n"
+
+    yaml_content += f"fastboot_reboot: {args.fastboot_reboot}\n"
 
     if transport:
         yaml_content += f"transport: {transport}\n"

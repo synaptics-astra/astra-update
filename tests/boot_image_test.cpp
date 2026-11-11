@@ -53,6 +53,7 @@ int main(int argc, char **argv)
         REQUIRE(image.GetUbootVersion() == ASTRA_UBOOT_VERSION_2025_01);
         REQUIRE(!image.GetUEnvSupport() && !image.GetNandSupport());
         REQUIRE(!image.GetXspiSupport().has_value());
+        REQUIRE(!image.GetFastbootReboot());
         REQUIRE(!image.IsLinuxBoot());
         REQUIRE(image.GetDefaultBootStage() == ASTRA_DEVICE_BOOT_STAGE_AUTO);
         REQUIRE(image.GetFinalBootImage() == "gen3_uboot.bin.usb");
@@ -78,6 +79,21 @@ int main(int argc, char **argv)
         test::WriteBootManifest(directory, fields);
         REQUIRE(image.Load());
         REQUIRE(!image.GetXspiSupport().has_value());
+    });
+    suite.Add("fastboot-reboot-flag-and-reload-default", [] {
+        test::TempDirectory directory;
+        auto fields = test::BootManifest();
+        AstraBootImage image(directory.Path().string());
+        for (const std::string value : {"true", "false", "true", ""}) {
+            if (value.empty()) {
+                fields.erase("fastboot_reboot");
+            } else {
+                fields["fastboot_reboot"] = value;
+            }
+            test::WriteBootManifest(directory, fields);
+            REQUIRE(image.Load());
+            REQUIRE(image.GetFastbootReboot() == (value == "true"));
+        }
     });
     for (const auto layout : test::layouts) {
         suite.Add(std::string("layout-") + layout.name, [=] {
@@ -291,7 +307,7 @@ int main(int argc, char **argv)
     const test::Manifest invalidValues = {
         {"memory_layout", "8gb"}, {"transport", "serial"}, {"vendor_id", "invalid"},
         {"product_id", ""}, {"uenv_support", "maybe"}, {"nand_support", "maybe"},
-        {"xspi_support", "maybe"}
+        {"xspi_support", "maybe"}, {"fastboot_reboot", "maybe"}
     };
     for (const auto &field : invalidValues) {
         suite.Add("invalid-field-" + field.first, [=] {
