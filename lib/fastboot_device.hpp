@@ -81,12 +81,6 @@ public:
      */
     bool Reboot(int timeoutMs = 5000);
 
-    /**
-     * Wait for a disconnect using bulk IN reads only, without sending commands.
-     * @return true if the device disconnected before timeoutMs elapsed.
-     */
-    bool WaitForDisconnect(int timeoutMs);
-
     /** @return true if the underlying USB device has disconnected. */
     bool IsDisconnected() const { return m_disconnected.load(); }
 

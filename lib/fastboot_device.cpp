@@ -4,7 +4,6 @@
 #include "fastboot_device.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -374,33 +373,4 @@ bool FastBootDevice::Reboot(int timeoutMs)
         return false;
     }
     return true;
-}
-
-bool FastBootDevice::WaitForDisconnect(int timeoutMs)
-{
-    ASTRA_LOG;
-
-    // libusb error values; including libusb.h here pulls in windows.h.
-    constexpr int kNoDevice = -4;
-    constexpr int kTimeout = -7;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (m_disconnected.load()) {
-            return true;
-        }
-        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now()).count();
-        uint8_t buf[kRespBufferSize] = {};
-        int received = 0;
-        const int ret = m_usbDevice->ReadBulk(buf, sizeof(buf), &received,
-            static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(250, remaining))));
-        if (ret == kNoDevice || m_disconnected.load()) {
-            return true;
-        }
-        if (ret < 0 && ret != kTimeout) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "FastBootDevice: disconnect read failed (ret=" << ret << ")" << endLog;
-            return false;
-        }
-    }
-    return m_disconnected.load();
 }

@@ -38,7 +38,7 @@ If the option is not supplied, the field is omitted for legacy compatibility.
 Boot manifests can declare ``fastboot_reboot: true`` for SL26XX U-Boot builds
 that support returning to fastboot after flashing. With reset enabled, the host
 waits up to eight minutes for fastboot re-entry, sends ``reboot``, reads its
-acknowledgement, and waits for USB disconnect. A timeout or reboot failure is
+acknowledgement, and completes without further USB I/O. A timeout or reboot failure is
 reported as an update failure. Missing or ``false`` retains the existing plain
 reset and Linux USB gadget detection, including its five-minute fallback.
 Other device series and updates with reset disabled do not use fastboot reboot.

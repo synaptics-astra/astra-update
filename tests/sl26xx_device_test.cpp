@@ -176,7 +176,8 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
         rebound->SetOnWrite([probe = reboundProbe, acceptReboot](const std::vector<uint8_t> &packet) {
             if (std::string(packet.begin(), packet.end()) == "reboot") {
                 probe->QueueRead(acceptReboot ? "OKAY" : "FAILdenied");
-                probe->QueueRead("", 0, -4);
+                probe->QueueRead("", 0, -9);
+                probe->QueueRead("", 0, -1);
             }
         });
         device->Rebind(std::move(rebound));
@@ -196,7 +197,7 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     if (reboundProbe && openRebind) {
         REQUIRE(reboundProbe->Writes() == std::vector<std::vector<uint8_t>>{
             {'r', 'e', 'b', 'o', 'o', 't'}});
-        REQUIRE(reboundProbe->ReadTimeouts().size() == (acceptReboot ? 2u : 1u));
+        REQUIRE(reboundProbe->ReadTimeouts().size() == 1);
     }
     device->Close();
 }
@@ -212,7 +213,7 @@ int main(int argc, char **argv)
     suite.Add("disabled-fastboot-reboot-preserves-linux-gadget-completion", [] {
         RequireFlashCompletion("false");
     });
-    suite.Add("fastboot-reboot-waits-for-reentry-ack-and-disconnect", [] {
+    suite.Add("fastboot-reboot-completes-on-ack-without-further-usb-io", [] {
         RequireFlashCompletion("true");
     });
     suite.Add("fastboot-reboot-rejection-fails-update", [] {

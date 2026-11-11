@@ -164,33 +164,6 @@ int main(int argc, char **argv)
             REQUIRE(!fastboot.Reboot());
         }
     });
-    suite.Add("disconnect-wait-only-reads-and-retries-timeouts", [] {
-        test::ScriptedUSBDevice usb;
-        usb.QueueRead("", 0, -7);
-        usb.QueueRead("INFOresetting");
-        usb.QueueRead("", 0, -4);
-        FastBootDevice fastboot(&usb);
-        REQUIRE(fastboot.WaitForDisconnect(1000));
-        REQUIRE(usb.Writes().empty());
-        REQUIRE(usb.ReadTimeouts().size() == 3);
-    });
-    suite.Add("disconnect-wait-does-not-treat-io-error-as-success", [] {
-        test::ScriptedUSBDevice usb;
-        usb.QueueRead("", 0, -1);
-        FastBootDevice fastboot(&usb);
-        REQUIRE(!fastboot.WaitForDisconnect(1000));
-        REQUIRE(usb.Writes().empty());
-    });
-    suite.Add("disconnect-wait-timeout-and-callback", [] {
-        test::ScriptedUSBDevice usb;
-        FastBootDevice fastboot(&usb);
-        REQUIRE(fastboot.Open());
-        REQUIRE(!fastboot.WaitForDisconnect(0));
-        REQUIRE(usb.ReadTimeouts().empty());
-        usb.Emit(USBDevice::USB_DEVICE_EVENT_NO_DEVICE);
-        REQUIRE(fastboot.WaitForDisconnect(1000));
-        REQUIRE(usb.Writes().empty() && usb.ReadTimeouts().empty());
-    });
     suite.Add("oem-and-no-wait-length-limits", [] {
         test::ScriptedUSBDevice usb;
         QueueOkay(usb);

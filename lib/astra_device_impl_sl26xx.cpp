@@ -537,7 +537,6 @@ private:
     // needlessly long when the real signal is missed.
     static constexpr std::chrono::seconds kPostFlashGracePeriod{300};
     static constexpr std::chrono::seconds kPostFlashFastbootTimeout{480};
-    static constexpr std::chrono::seconds kRebootDisconnectTimeout{10};
 
     // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
     // arrives on this device's registered USB path.
@@ -585,10 +584,6 @@ private:
                 std::lock_guard<std::mutex> lock(m_deviceMutex);
                 if (!m_fastbootDevice || !m_fastbootDevice->Reboot()) {
                     failure = "Device did not acknowledge fastboot reboot";
-                } else if (!m_fastbootDevice->WaitForDisconnect(
-                    static_cast<int>(std::chrono::milliseconds(kRebootDisconnectTimeout).count())))
-                {
-                    failure = "Device did not disconnect after fastboot reboot";
                 }
             }
         }
