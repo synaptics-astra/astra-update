@@ -1,7 +1,7 @@
 set(ASTRA_UNIT_TEST_TARGETS)
 foreach(component IN ITEMS test-support image boot-image-collection boot-image device-api log console utils
     flash-image tag-detection uboot-validation emmc-flash-image spi-flash-image nand-flash-image
-    fastboot-device usb-callback-worker usb-transport astra-device-impl sl16xx-device)
+    fastboot-device usb-callback-worker usb-transport astra-device-impl sl16xx-device sl26xx-device)
     string(REPLACE "-" "_" source_name ${component})
     add_executable(${component}-test ${source_name}_test.cpp)
     target_include_directories(${component}-test PRIVATE ${PROJECT_SOURCE_DIR}/lib)
@@ -15,7 +15,7 @@ foreach(component IN ITEMS test-support image boot-image-collection boot-image d
     add_test(NAME ${component} COMMAND ${component}-test)
     if(component MATCHES "^(flash-image|tag-detection|uboot-validation|.*-flash-image)$")
         set_tests_properties(${component} PROPERTIES LABELS "unit;flash" TIMEOUT 30)
-    elseif(component MATCHES "^(fastboot-device|usb-callback-worker|usb-transport|astra-device-impl|sl16xx-device)$")
+    elseif(component MATCHES "^(fastboot-device|usb-callback-worker|usb-transport|astra-device-impl|sl16xx-device|sl26xx-device)$")
         set_tests_properties(${component} PROPERTIES LABELS "unit;simulated-device" TIMEOUT 30)
     else()
         set_tests_properties(${component} PROPERTIES LABELS "unit;core" TIMEOUT 30)
