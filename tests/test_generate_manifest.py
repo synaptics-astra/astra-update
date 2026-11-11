@@ -32,6 +32,8 @@ class GenerateManifestTests(unittest.TestCase):
 
     def test_update_manifest_shapes_and_payloads(self):
         cases = (
+            ('spi', ()),
+            ('spi', ('--image_file', 'custom.bin')),
             ('spi', ('--image_file', 'spi_suboot.bin', '--image_file', 'boot.subimg')),
             ('emmc', ()),
             ('nand', ()),
@@ -51,8 +53,9 @@ class GenerateManifestTests(unittest.TestCase):
                 self.assertEqual(self.update_fields(output), expected)
                 image_lines = [line for line in output.read_text().splitlines() if line.startswith(' ')]
                 if image_type == 'spi':
+                    payloads = options[1::2] if options else ('spi_suboot.bin',)
                     self.assertEqual(image_lines, [
-                        '    "spi_suboot.bin": {}', '    "boot.subimg": {}',
+                        f'    "{name}": {{}}' for name in payloads
                     ])
                 else:
                     self.assertEqual(image_lines, [])
@@ -128,7 +131,6 @@ class GenerateManifestTests(unittest.TestCase):
 
     def test_invalid_update_inputs_do_not_write_manifest(self):
         cases = (
-            ('spi', ()),
             ('spi', ('--image_file', '../payload.bin')),
             ('spi', ('--image_file', 'a.bin', '--image_file', 'a.bin')),
             ('spi', ('--image_file', 'bad file.bin')),

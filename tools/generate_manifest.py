@@ -111,7 +111,8 @@ def main():
     parser.add_argument('--image_type', choices=('boot', 'spi', 'emmc', 'nand'), default='boot',
                         help='Manifest type (default: boot)')
     parser.add_argument('--image_file', action='append',
-                        help='SPI or NAND payload filename; repeat for multiple SPI payloads')
+                        help='SPI or NAND payload filename (defaults: SPI spi_suboot.bin, NAND uNAND_full.img); '
+                             'repeat for multiple SPI payloads')
     parser.add_argument('--boot_image', help='Optional boot image ID for update manifests')
     parser.add_argument('--reset', choices=('enable', 'disable'), default='enable',
                         help='Reset after an update (default: enable)')
@@ -163,8 +164,6 @@ def main():
         ) if not value]
         if missing:
             parser.error('Required update manifest values are missing: ' + ', '.join(missing))
-        if args.image_type == 'spi' and not args.image_file:
-            parser.error('SPI manifests require at least one --image_file')
         if args.image_type == 'emmc' and args.image_file:
             parser.error('eMMC manifests use emmc_part_list, not --image_file')
         if args.image_type == 'nand' and args.image_file and len(args.image_file) != 1:
@@ -194,7 +193,7 @@ def main():
         yaml_content = ''.join(f'{key}: {json.dumps(value)}\n' for key, value in fields.items())
         if args.image_type == 'spi':
             yaml_content += 'images:\n'
-            for name in args.image_file:
+            for name in args.image_file or ['spi_suboot.bin']:
                 yaml_content += f'    {json.dumps(name)}: {{}}\n'
         with open(args.output, 'w') as file:
             file.write(yaml_content)

@@ -52,7 +52,7 @@ For example, invoke the generator from the image packaging step:
 
 ```sh
 python3 tools/generate_manifest.py --image_type spi \
-    --sdk_config /build/sdk/.config --image_file spi_suboot.bin \
+    --sdk_config /build/sdk/.config \
     --output /deploy/coralboard_xspi/manifest.yaml
 
 python3 tools/generate_manifest.py --image_type emmc \
@@ -64,8 +64,9 @@ python3 tools/generate_manifest.py --image_type nand \
 
 The output directory must already exist. Place the manifest directly beside
 the payloads in the directory supplied to `astra-update --flash`.
-SPI requires at least one `--image_file`; repeat it to generate multiple entries
-in the `images` map. Payload names must be safe U-Boot filenames, not paths.
+SPI defaults to `spi_suboot.bin` in the `images` map. Use `--image_file` to
+override this default; repeat it to generate multiple entries instead.
+Payload names must be safe U-Boot filenames, not paths.
 eMMC uses `emmc_part_list` in the update directory and does not accept
 `--image_file`. NAND defaults to `uNAND_full.img`; use a single `--image_file`
 to override it.
