@@ -43,7 +43,7 @@ constexpr uint8_t kOpcodeUpload = 0x12;
 constexpr uint8_t kOpcodeUploadKey = 0x01;
 constexpr uint8_t kOpcodeUploadSpk = 0x02;
 constexpr uint8_t kOpcodeUploadM52Bl = 0x04;
-constexpr uint32_t kSpkVersionKeyResendThreshold = 0xA0030700U;
+constexpr uint32_t kSpkVersionKeyResendThreshold = 0xA00C0307U;
 
 constexpr uint8_t kHostApiOpcodeGeneric = 0x12;
 constexpr uint8_t kHostApiOpcodeVersion = 0x0A;
@@ -1113,7 +1113,6 @@ private:
                                   << " (0x" << std::hex << std::uppercase << spkVersion
                                   << std::dec << ")" << endLog;
 
-#if 0
         if (spkVersion >= kSpkVersionKeyResendThreshold) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX SPK version supports resending key image" << endLog;
             if (!SendSpkFile(keyImage->GetPath(), keyImage->GetName(), kOpcodeUploadKey)) {
@@ -1121,7 +1120,6 @@ private:
                 return false;
             }
         }
-#endif
 
         if (!SendSpkFile(m52BlImage->GetPath(), m52BlImage->GetName(), kOpcodeUploadM52Bl)) {
             return false;
