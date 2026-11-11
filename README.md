@@ -31,9 +31,51 @@ but SPI updates reject an image marked ``xspi_support: false``. Customers can
 keep otherwise matching eMMC and XSPI USB boot images in one collection by marking
 them ``false`` and ``true``, respectively, without specifying a boot-image ID.
 
-When using [generate_boot_manifest.py](tools/generate_boot_manifest.py), pass
+When using [generate_manifest.py](tools/generate_manifest.py), pass
 ``--xspi_support true`` or ``--xspi_support false`` to emit this field.
 If the option is not supplied, the field is omitted for legacy compatibility.
+
+### Generating manifests during a build
+
+[generate_manifest.py](tools/generate_manifest.py) writes one manifest
+per invocation. `--image_type boot` (the default) retains the USB boot manifest
+format. Use `spi`, `emmc`, or `nand` to generate an update manifest without USB
+boot-only fields.
+
+All modes reuse `--sdk_config` to derive chip, board, secure boot, memory layout,
+and DDR type. Explicit command-line values take precedence. Update manifests
+require chip, board, secure boot, and memory layout; DDR type is included when
+available. Pass `--memory_layout` explicitly if the target layout differs from
+the SDK's `CONFIG_PREBOOT_MEMORY_SIZE`.
+
+For example, invoke the generator from the image packaging step:
+
+```sh
+python3 tools/generate_manifest.py --image_type spi \
+    --sdk_config /build/sdk/.config \
+    --output /deploy/coralboard_xspi/manifest.yaml
+
+python3 tools/generate_manifest.py --image_type emmc \
+    --sdk_config /build/sdk/.config --output /deploy/eMMCimg/manifest.yaml
+
+python3 tools/generate_manifest.py --image_type nand \
+    --sdk_config /build/sdk/.config --output /deploy/nand/manifest.yaml
+```
+
+The output directory must already exist. Place the manifest directly beside
+the payloads in the directory supplied to `astra-update --flash`.
+SPI defaults to `spi_suboot.bin` in the `images` map. Use `--image_file` to
+override this default; repeat it to generate multiple entries instead.
+Payload names must be safe U-Boot filenames, not paths.
+eMMC uses `emmc_part_list` in the update directory and does not accept
+`--image_file`. NAND defaults to `uNAND_full.img`; use a single `--image_file`
+to override it.
+
+Update manifests omit `boot_image` by default, allowing automatic boot-image
+selection. Supply `--boot_image ID` to pin one. `--reset enable|disable` defaults
+to `enable`. USB capability options such as `--xspi_support` describe boot images
+and are not emitted in update manifests. USB console configuration and the
+U-Boot binary are not required for update manifests.
 
 ### The Temp Directory
 

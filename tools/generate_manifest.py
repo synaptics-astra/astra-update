@@ -1,7 +1,7 @@
-# Generate Manifest files for boot images
+# Generate manifest files for USB boot and SPI/eMMC/NAND update images.
 # This script can be run as part of the build process using the uboot_binary,
 # sdK_config, and uboot_config arguments.
-# python3 generate_boot_manifest.py \
+# python3 generate_manifest.py \
 #            --uboot_binary ${B}/target/release/uboot/uboot_en.bin \
 #            --sdk_config ${STAGING_DATADIR_NATIVE}/syna/build/.config \
 #            --uboot_config ${B}/target/release/uboot/intermediate/output_uboot/.config \
@@ -12,6 +12,7 @@ import uuid
 import argparse
 import subprocess
 import re
+import json
 
 
 def extract_chip_from_product_name(line):
@@ -106,7 +107,15 @@ def parse_uboot_config(file_path):
     return console, uenv_support
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate a manifest.yaml file for a boot image.")
+    parser = argparse.ArgumentParser(description="Generate a manifest.yaml file for a boot or update image.")
+    parser.add_argument('--image_type', choices=('boot', 'spi', 'emmc', 'nand'), default='boot',
+                        help='Manifest type (default: boot)')
+    parser.add_argument('--image_file', action='append',
+                        help='SPI or NAND payload filename (defaults: SPI spi_suboot.bin, NAND uNAND_full.img); '
+                             'repeat for multiple SPI payloads')
+    parser.add_argument('--boot_image', help='Optional boot image ID for update manifests')
+    parser.add_argument('--reset', choices=('enable', 'disable'), default='enable',
+                        help='Reset after an update (default: enable)')
     parser.add_argument('--chip')
     parser.add_argument('--board')
     parser.add_argument('--secure_boot')
@@ -133,12 +142,6 @@ def main():
 
     args = parser.parse_args()
 
-    unique_id = str(uuid.uuid1())
-
-    uboot_version = args.uboot_version
-    if not uboot_version and args.uboot_binary:
-        uboot_version = extract_uboot_version(args.uboot_binary)
-
     secure_boot = args.secure_boot
     memory_layout = args.memory_layout
     ddr_type = args.ddr_type
@@ -153,6 +156,56 @@ def main():
         uboot = uboot or ub
         chip = chip or cp
         board = board or bd
+
+    if args.image_type != 'boot':
+        missing = [name for name, value in (
+            ('chip', chip), ('board', board), ('secure_boot', secure_boot),
+            ('memory_layout', memory_layout),
+        ) if not value]
+        if missing:
+            parser.error('Required update manifest values are missing: ' + ', '.join(missing))
+        if args.image_type == 'emmc' and args.image_file:
+            parser.error('eMMC manifests use emmc_part_list, not --image_file')
+        if args.image_type == 'nand' and args.image_file and len(args.image_file) != 1:
+            parser.error('NAND manifests accept only one --image_file')
+        if args.image_file:
+            if len(set(args.image_file)) != len(args.image_file):
+                parser.error('Duplicate --image_file values are not allowed')
+            for name in args.image_file:
+                if (name in ('.', '..') or len(name) > 255
+                        or re.fullmatch(r'[A-Za-z0-9._+-]+', name) is None):
+                    parser.error('Invalid payload filename: ' + name)
+
+        fields = {
+            'image_type': args.image_type,
+            'chip': chip,
+            'board': board,
+            'secure_boot': secure_boot,
+            'memory_layout': memory_layout,
+        }
+        if ddr_type:
+            fields['ddr_type'] = ddr_type
+        if args.boot_image:
+            fields['boot_image'] = args.boot_image
+        fields['reset'] = args.reset
+        if args.image_type == 'nand':
+            fields['image_file'] = args.image_file[0] if args.image_file else 'uNAND_full.img'
+        yaml_content = ''.join(f'{key}: {json.dumps(value)}\n' for key, value in fields.items())
+        if args.image_type == 'spi':
+            yaml_content += 'images:\n'
+            for name in args.image_file or ['spi_suboot.bin']:
+                yaml_content += f'    {json.dumps(name)}: {{}}\n'
+        with open(args.output, 'w') as file:
+            file.write(yaml_content)
+        return
+
+    if args.image_file or args.boot_image:
+        parser.error('--image_file and --boot_image are only supported for update manifests')
+
+    unique_id = str(uuid.uuid1())
+    uboot_version = args.uboot_version
+    if not uboot_version and args.uboot_binary:
+        uboot_version = extract_uboot_version(args.uboot_binary)
 
     console = args.console
     uenv_support = args.uenv_support
