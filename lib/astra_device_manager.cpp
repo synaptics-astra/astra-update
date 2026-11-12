@@ -483,7 +483,8 @@ private:
             // The flash command itself is series-agnostic; append the
             // device-specific tail here (e.g. reset vs re-enter fastboot)
             // now that the series is known.
-            m_bootCommand += AstraDevice::GetFlashCompletionCommand(m_deviceSeries);
+            m_bootCommand += AstraDevice::GetFlashCompletionCommand(m_deviceSeries,
+                m_bootImage->GetFastbootReboot());
         }
 
         bootImageDescription += "    Device Series: " + AstraDevice::AstraDeviceSeriesToString(m_deviceSeries) + "\n";
@@ -491,6 +492,7 @@ private:
         bootImageDescription += "    U-Boot Console: " + std::string(m_bootImage->GetUbootConsole() == ASTRA_UBOOT_CONSOLE_UART ? "UART" : "USB") + "\n";
         bootImageDescription += "    uEnv.txt Support: " + std::string(m_bootImage->GetUEnvSupport() ? "enabled" : "disabled") + "\n";
         bootImageDescription += "    NAND Support: " + std::string(m_bootImage->GetNandSupport() ? "enabled" : "disabled") + "\n";
+        bootImageDescription += "    Fastboot Reboot: " + std::string(m_bootImage->GetFastbootReboot() ? "enabled" : "disabled") + "\n";
         bootImageDescription += "    XSPI Support: " + std::string(m_bootImage->GetXspiSupport().has_value()
             ? (m_bootImage->GetXspiSupport().value() ? "enabled" : "disabled") : "unspecified") + "\n";
         bootImageDescription += "    U-Boot Variant: " + std::string(m_bootImage->GetUbootVariant() == ASTRA_UBOOT_VARIANT_UBOOT ? "U-Boot" : "Synaptics U-Boot");

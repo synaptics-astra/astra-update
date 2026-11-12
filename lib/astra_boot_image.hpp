@@ -44,6 +44,7 @@ public:
     bool GetUEnvSupport() const { return m_uEnvSupport; }
     bool GetNandSupport() const { return m_nandSupport; }
     std::optional<bool> GetXspiSupport() const { return m_xspiSupport; }
+    bool GetFastbootReboot() const { return m_fastbootReboot; }
     AstraSecureBootVersion GetSecureBootVersion() const { return m_secureBootVersion; }
     AstraUbootConsole GetUbootConsole() const { return m_ubootConsole; }
     AstraMemoryLayout GetMemoryLayout() const { return m_memoryLayout; }
@@ -82,6 +83,7 @@ private:
     AstraDeviceBootStage m_defaultBootStage = ASTRA_DEVICE_BOOT_STAGE_AUTO;
     bool m_nandSupport = false;
     std::optional<bool> m_xspiSupport;
+    bool m_fastbootReboot = false;
 
     bool LoadManifest(std::string manifestPath);
 };

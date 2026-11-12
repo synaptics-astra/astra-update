@@ -174,6 +174,10 @@ reports connection-open failures and honors `--exit-on-error` in continuous mode
 `LogLevel.TRACE` and `LogLevel.NONE` are available alongside the other native
 log levels. `AstraDevice.get_flash_completion_command(DeviceSeries.SL26XX)`
 exposes the native, series-specific flash-command tail.
+Pass `fastboot_reboot=True` to select the SL26XX fastboot re-entry command;
+the default remains the legacy reset command.
+`AstraBootImage.get_fastboot_reboot()` returns the boot manifest's capability
+flag, defaulting to `False` when omitted. The manager uses it automatically.
 
 #### Response Handling with Callbacks
 

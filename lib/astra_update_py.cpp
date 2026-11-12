@@ -199,7 +199,7 @@ PYBIND11_MODULE(_astra_update, m) {
         .def_static("series_to_string", &AstraDevice::AstraDeviceSeriesToString)
         .def_static("boot_stage_from_string", &AstraDevice::BootStageFromString)
         .def_static("get_flash_completion_command", &AstraDevice::GetFlashCompletionCommand,
-            py::arg("series"));
+            py::arg("series"), py::arg("fastboot_reboot") = false);
 
     // AstraDeviceManager class
     py::class_<AstraDeviceManager, std::shared_ptr<AstraDeviceManager>>(m, "AstraDeviceManager")
@@ -309,6 +309,7 @@ PYBIND11_MODULE(_astra_update, m) {
         .def("get_id", &AstraBootImage::GetID)
         .def("get_uenv_support", &AstraBootImage::GetUEnvSupport)
         .def("get_nand_support", &AstraBootImage::GetNandSupport)
+        .def("get_fastboot_reboot", &AstraBootImage::GetFastbootReboot)
         .def("get_xspi_support", &AstraBootImage::GetXspiSupport,
             "Return True/False for explicit XSPI support, or None when unspecified")
         .def("get_secure_boot_version", &AstraBootImage::GetSecureBootVersion)

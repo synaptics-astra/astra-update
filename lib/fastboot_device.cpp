@@ -361,13 +361,16 @@ bool FastBootDevice::OemNoWait(const std::string &command)
     return ok;
 }
 
-bool FastBootDevice::Reboot()
+bool FastBootDevice::Reboot(int timeoutMs)
 {
     ASTRA_LOG;
 
-    const bool ok = SendCommand("reboot");
-    if (!ok) {
-        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot send failed" << endLog;
+    // U-Boot does not reset until the host reads the OKAY reply.
+    uint32_t unused = 0;
+    const std::string result = ExecuteCommand("reboot", unused, timeoutMs);
+    if (result != "OKAY") {
+        log(ASTRA_LOG_LEVEL_WARNING) << "FastBootDevice: reboot not acknowledged (result=" << result << ")" << endLog;
+        return false;
     }
-    return ok;
+    return true;
 }

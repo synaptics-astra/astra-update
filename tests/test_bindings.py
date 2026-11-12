@@ -338,8 +338,10 @@ class TestFlashImageLoading:
         assert flash_image.load() == 0
         assert flash_image.get_size() == len(b"firmware")
 
-    @pytest.mark.parametrize("xspi_support", [None, False, True])
-    def test_native_boot_image_getters(self, tmp_path, xspi_support):
+    @pytest.mark.parametrize("xspi_support,fastboot_reboot", [
+        (None, None), (False, False), (True, True),
+    ])
+    def test_native_boot_image_getters(self, tmp_path, xspi_support, fastboot_reboot):
         from astra_update import (
             AstraBootImage,
             DeviceBootStage,
@@ -368,6 +370,8 @@ class TestFlashImageLoading:
         )
         if xspi_support is not None:
             manifest += f"xspi_support: {str(xspi_support).lower()}\n"
+        if fastboot_reboot is not None:
+            manifest += f"fastboot_reboot: {str(fastboot_reboot).lower()}\n"
         (tmp_path / "manifest.yaml").write_text(manifest, encoding="utf-8")
         (tmp_path / "bl.bin").write_bytes(b"boot")
 
@@ -386,6 +390,7 @@ class TestFlashImageLoading:
         assert boot_image.get_uenv_support() is True
         assert boot_image.get_nand_support() is False
         assert boot_image.get_xspi_support() is xspi_support
+        assert boot_image.get_fastboot_reboot() is (fastboot_reboot is True)
         assert boot_image.get_secure_boot_version() == SecureBootVersion.GEN2
         assert boot_image.get_uboot_console() == UbootConsole.UART
         assert boot_image.get_memory_layout() == MemoryLayout.GB_4
@@ -446,6 +451,10 @@ class TestStaticMethods:
         from astra_update import AstraDevice, DeviceSeries
 
         assert AstraDevice.get_flash_completion_command(getattr(DeviceSeries, series)) == command
+        assert AstraDevice.get_flash_completion_command(
+            getattr(DeviceSeries, series), fastboot_reboot=True
+        ) == ("; sleep 1; fastboot -l 0x10000000 -s 0x8000000 usb 0"
+              if series == "SL26XX" else command)
 
 
 class TestResponseQueue:

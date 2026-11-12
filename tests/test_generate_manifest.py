@@ -193,6 +193,55 @@ class GenerateManifestTests(unittest.TestCase):
             self.assertIn('invalid choice', result.stderr)
             self.assertFalse(output.exists())
 
+    def test_fastboot_reboot_default_and_overrides(self):
+        for chip in ('sl2610', 'sl2619', 'sl1680', 'sl2600', 'sl2620'):
+            for value in (None, 'true', 'false'):
+                with self.subTest(chip=chip, value=value), tempfile.TemporaryDirectory() as directory:
+                    output = Path(directory) / 'manifest.yaml'
+                    options = ['--fastboot_reboot', value] if value is not None else []
+                    result = subprocess.run([
+                        sys.executable, str(GENERATOR), '--chip', chip, '--console', 'uart',
+                        '--secure_boot', 'genx', '--output', str(output), *options,
+                    ], capture_output=True, text=True)
+                    if value == 'true' and not chip.startswith('sl261'):
+                        self.assertEqual(result.returncode, 2)
+                        self.assertIn('only supported for SL261x', result.stderr)
+                        self.assertFalse(output.exists())
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        fields = dict(line.split(': ', 1) for line in output.read_text().splitlines())
+                        default = 'true' if chip.startswith('sl261') else 'false'
+                        self.assertEqual(fields['fastboot_reboot'], value or default)
+
+    def test_fastboot_reboot_uses_sdk_chip_with_cli_precedence(self):
+        for sdk_chip, override, expected in (
+            ('sl2619', None, 'true'), ('sl1680', None, 'false'),
+            ('sl2619', 'sl1680', 'false'), ('sl1680', 'sl2619', 'true'),
+        ):
+            with self.subTest(sdk_chip=sdk_chip, override=override), tempfile.TemporaryDirectory() as directory:
+                config = Path(directory) / 'sdk.config'
+                config.write_text(f'CONFIG_PRODUCT_NAME="{sdk_chip}_aarch64_rdk"\n')
+                output = Path(directory) / 'manifest.yaml'
+                options = ['--chip', override] if override is not None else []
+                result = subprocess.run([
+                    sys.executable, str(GENERATOR), '--sdk_config', str(config),
+                    '--console', 'uart', '--output', str(output), *options,
+                ], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                fields = dict(line.split(': ', 1) for line in output.read_text().splitlines())
+                self.assertEqual(fields['fastboot_reboot'], expected)
+
+    def test_invalid_fastboot_reboot_does_not_write_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'manifest.yaml'
+            result = subprocess.run([
+                sys.executable, str(GENERATOR), '--fastboot_reboot', 'maybe',
+                '--output', str(output),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('--fastboot_reboot', result.stderr)
+            self.assertFalse(output.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

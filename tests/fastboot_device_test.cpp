@@ -148,11 +148,21 @@ int main(int argc, char **argv)
         test::ScriptedUSBDevice usb;
         FastBootDevice fastboot(&usb);
         REQUIRE(fastboot.OemNoWait("fb_exit"));
-        REQUIRE(fastboot.Reboot());
         REQUIRE(usb.ReadTimeouts().empty());
+        QueueOkay(usb);
+        REQUIRE(fastboot.Reboot(123));
+        REQUIRE(usb.ReadTimeouts() == std::vector<int>({123}));
         const auto writes = usb.Writes();
         REQUIRE(writes.size() == 2);
         REQUIRE(Text(writes[0]) == "oem fb_exit" && Text(writes[1]) == "reboot");
+    });
+    suite.Add("reboot-requires-acknowledgement", [] {
+        for (const std::string response : {"FAILdenied", "OK", ""}) {
+            test::ScriptedUSBDevice usb;
+            usb.QueueRead(response);
+            FastBootDevice fastboot(&usb);
+            REQUIRE(!fastboot.Reboot());
+        }
     });
     suite.Add("oem-and-no-wait-length-limits", [] {
         test::ScriptedUSBDevice usb;

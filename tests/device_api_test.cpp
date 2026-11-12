@@ -60,6 +60,11 @@ int main(int argc, char **argv)
         for (const auto &entry : series) {
             REQUIRE(AstraDevice::AstraDeviceSeriesToString(entry.first) == entry.second);
             REQUIRE(AstraDevice::GetFlashCompletionCommand(entry.first) == "; sleep 1; reset");
+            REQUIRE(AstraDevice::GetFlashCompletionCommand(entry.first, false) == "; sleep 1; reset");
+            REQUIRE(AstraDevice::GetFlashCompletionCommand(entry.first, true) ==
+                (entry.first == ASTRA_SERIES_SL26XX
+                    ? "; sleep 1; fastboot -l 0x10000000 -s 0x8000000 usb 0"
+                    : "; sleep 1; reset"));
         }
         REQUIRE(AstraDevice::AstraDeviceSeriesToString(static_cast<AstraDeviceSeries>(3)) == "UNKNOWN");
     });

@@ -322,4 +322,4 @@ std::unique_ptr<AstraDeviceImpl> CreateAstraDeviceSL26XXImpl(std::unique_ptr<USB
 // completes, to hand control back to the host: each series' bootloader
 // supports a different mechanism (plain reset vs re-entering fastboot).
 std::string GetSL16XXFlashCompletionCommand();
-std::string GetSL26XXFlashCompletionCommand();
+std::string GetSL26XXFlashCompletionCommand(bool fastbootReboot = false);
