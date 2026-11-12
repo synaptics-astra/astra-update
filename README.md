@@ -35,7 +35,7 @@ When using [generate_manifest.py](tools/generate_manifest.py), pass
 ``--xspi_support true`` or ``--xspi_support false`` to emit this field.
 If the option is not supplied, the field is omitted for legacy compatibility.
 
-Boot manifests can declare ``fastboot_reboot: true`` for SL26XX U-Boot builds
+Boot manifests can declare ``fastboot_reboot: true`` for SL261x U-Boot builds
 that support returning to fastboot after flashing. With reset enabled, the host
 waits up to eight minutes for fastboot re-entry, sends ``reboot``, reads its
 acknowledgement, and completes without further USB I/O. A timeout or reboot failure is
@@ -43,7 +43,10 @@ reported as an update failure. Missing or ``false`` retains the existing plain
 reset and Linux USB gadget detection, including its five-minute fallback.
 Other device series and updates with reset disabled do not use fastboot reboot.
 
-The generator emits ``fastboot_reboot: true`` in boot manifests by default.
+The generator emits ``fastboot_reboot: true`` by default only for SL261x boot
+manifests; other chips default to ``false``. An explicit
+``--fastboot_reboot true`` is rejected for non-SL261x chips. This check uses
+the chip resolved from ``--sdk_config`` or its ``--chip`` override.
 Use ``--fastboot_reboot false`` when packaging older U-Boot builds that do not
 support this flow. This flag describes the USB boot image, not the flashed image.
 

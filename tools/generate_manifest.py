@@ -130,9 +130,10 @@ def main():
     parser.add_argument('--nand_support', default=None, help='Whether NAND boot is supported (true/false)')
     parser.add_argument('--xspi_support', choices=('true', 'false'), default=None,
                         help='Whether XSPI flash updates are supported (true/false); omitted if unspecified')
-    parser.add_argument('--fastboot_reboot', choices=('true', 'false'), default='true',
+    parser.add_argument('--fastboot_reboot', choices=('true', 'false'), default=None,
                         help='Re-enter fastboot after flashing for host-controlled reboot '
-                             '(default: true); set false for older U-Boot builds')
+                             '(SL261x only; default: true for SL261x, false otherwise); '
+                             'set false for older U-Boot builds')
     parser.add_argument('--transport', default=None, help='Boot image transport type (usb or usb_cdc)')
     parser.add_argument('--memory_layout')
     parser.add_argument('--ddr-type')
@@ -204,6 +205,13 @@ def main():
 
     if args.image_file or args.boot_image:
         parser.error('--image_file and --boot_image are only supported for update manifests')
+
+    supports_fastboot_reboot = bool(chip and re.fullmatch(r'sl261[0-9]', chip, re.IGNORECASE))
+    if args.fastboot_reboot == 'true' and not supports_fastboot_reboot:
+        parser.error('--fastboot_reboot true is only supported for SL261x chips')
+    fastboot_reboot = args.fastboot_reboot
+    if fastboot_reboot is None:
+        fastboot_reboot = 'true' if supports_fastboot_reboot else 'false'
 
     unique_id = str(uuid.uuid1())
     uboot_version = args.uboot_version
@@ -277,7 +285,7 @@ uboot_version: \"{uboot_version}\"
     if args.xspi_support is not None:
         yaml_content += f"xspi_support: {args.xspi_support}\n"
 
-    yaml_content += f"fastboot_reboot: {args.fastboot_reboot}\n"
+    yaml_content += f"fastboot_reboot: {fastboot_reboot}\n"
 
     if transport:
         yaml_content += f"transport: {transport}\n"
