@@ -196,7 +196,11 @@ int main(int argc, char* argv[])
             } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_START) {
                 std::cout << "Updating Device: " << deviceResponse.m_deviceName << std::endl;
             } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
-                std::cout << "Device: " << deviceResponse.m_deviceName << " Update Complete" << std::endl;
+                std::cout << "Device: " << deviceResponse.m_deviceName << " Update Complete";
+                if (!deviceResponse.m_message.empty() && deviceResponse.m_message != "Success") {
+                    std::cout << ": " << deviceResponse.m_message;
+                }
+                std::cout << std::endl;
             } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
                 deviceResponse.m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL) {
                 std::cout << "Device: " << deviceResponse.m_deviceName
