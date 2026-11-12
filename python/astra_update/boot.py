@@ -204,6 +204,9 @@ class AstraBootTool:
             print(f"[DEVICE] Booting: {device_name}")
         elif status == DeviceStatus.BOOT_COMPLETE:
             print(f"[DEVICE] Boot complete: {device_name}")
+        elif status == DeviceStatus.UPDATE_COMPLETE:
+            detail = f": {message}" if message and message != "Success" else ""
+            print(f"[DEVICE] Update complete: {device_name}{detail}")
         elif status in (DeviceStatus.OPEN_FAIL, DeviceStatus.BOOT_FAIL):
             reason = "Connection failed" if status == DeviceStatus.OPEN_FAIL else "Boot failed"
             print(f"[ERROR] {reason} for {device_name}: {message}",

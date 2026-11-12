@@ -148,11 +148,14 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     std::promise<void> waiting;
     auto waitingFuture = waiting.get_future();
     std::atomic<int> legacyRegistrations{0};
+    std::string completionMessage;
     device->SetStatusCallback([&](AstraDeviceManagerResponse response) {
         if (response.IsDeviceResponse()) {
             const auto event = response.GetDeviceResponse();
             if (event.m_status == ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE && event.m_imageName.empty()) {
                 waiting.set_value();
+            } else if (event.m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
+                completionMessage = event.m_message;
             }
         }
     });
@@ -193,6 +196,9 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     REQUIRE(completion.get() == (failed ? -1 : 0));
     REQUIRE(device->GetDeviceStatus() == (failed
         ? ASTRA_DEVICE_STATUS_UPDATE_FAIL : ASTRA_DEVICE_STATUS_UPDATE_COMPLETE));
+    if (!failed) {
+        REQUIRE(completionMessage == "Success");
+    }
     REQUIRE(legacyRegistrations.load() == (useFastboot ? 0 : 1));
     if (reboundProbe && openRebind) {
         REQUIRE(reboundProbe->Writes() == std::vector<std::vector<uint8_t>>{

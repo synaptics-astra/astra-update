@@ -418,7 +418,7 @@ public:
                 }
             } else {
                 if (m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) {
-                    ReportStatus(m_status, 100, "", "Success");
+                    ReportStatus(m_status, 100, "", m_updateCompletionMessage);
                 }
             }
         }
@@ -507,6 +507,7 @@ private:
 
     bool m_deviceOpened = false;
     bool m_fastbootReboot = false;
+    std::string m_updateCompletionMessage = "Success";
 
     // Rebind-mode state: armed once the device carries our UUID as serialno.
     // m_rebindReady is set by Rebind() and cleared by WaitForRebind().
@@ -625,9 +626,10 @@ private:
             m_registerFinalBootPath(usbPath);
         }
 
+        bool waitConditionMet = false;
         {
             std::unique_lock<std::mutex> lock(m_finalBootMutex);
-            m_finalBootCV.wait_for(lock, kPostFlashGracePeriod, [this] {
+            waitConditionMet = m_finalBootCV.wait_for(lock, kPostFlashGracePeriod, [this] {
                 return m_finalBootDetected.load() || m_shutdown.load();
             });
         }
@@ -638,9 +640,12 @@ private:
 
         if (m_finalBootDetected.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: completing on final boot gadget detection" << endLog;
-        } else {
+        } else if (!waitConditionMet) {
+            m_updateCompletionMessage = "Update likely completed, but device state could not be confirmed after timeout.";
             log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX: final boot gadget not detected within "
                 << kPostFlashGracePeriod.count() << "s; completing anyway" << endLog;
+        } else {
+            log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: final boot wait interrupted by shutdown" << endLog;
         }
 
         m_rebindArmed.store(false);

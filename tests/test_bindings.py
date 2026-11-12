@@ -175,6 +175,23 @@ class TestBootTool:
         assert "Waiting for test-device: Device processing final image" in output.out
         assert output.err == ""
 
+    def test_update_complete_displays_completion_message(self, monkeypatch, capsys):
+        from unittest.mock import Mock
+        import astra_update.boot as boot
+        from astra_update import DeviceManagerResponse, DeviceResponse, DeviceStatus, Event
+
+        monkeypatch.setattr(boot, "AstraDeviceManager", Mock())
+        tool = boot.AstraBootTool("images")
+        response = DeviceResponse()
+        response.device_name = "test-device"
+        response.status = DeviceStatus.UPDATE_COMPLETE
+        response.message = "Update likely completed, but device state could not be confirmed after timeout."
+        tool._handle_device_event(Event.from_response(DeviceManagerResponse(response)))
+
+        output = capsys.readouterr().out
+        assert "test-device" in output
+        assert "device state could not be confirmed after timeout" in output
+
     def test_current_options_are_forwarded(self, monkeypatch):
         from unittest.mock import Mock
         import astra_update.boot as astra_update_boot
