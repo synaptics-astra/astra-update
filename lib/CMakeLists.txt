@@ -122,11 +122,23 @@ target_include_directories(_astra_update PRIVATE ${CMAKE_SOURCE_DIR}/lib)
 target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/yaml-cpp/include)
 target_include_directories(_astra_update PRIVATE ${CMAKE_BINARY_DIR}/libusb/include)
 
-# Copy the built extension into the package source tree. This enables
-# pip-based installs from the repository root after the CMake build step.
-add_custom_command(TARGET _astra_update POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_FILE:_astra_update>
-        ${CMAKE_SOURCE_DIR}/python/astra_update/$<TARGET_FILE_NAME:_astra_update>
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/python/astra_update/
+    DESTINATION astra_update
+    FILES_MATCHING
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.py"
 )
-    endif()
+install(TARGETS _astra_update
+    LIBRARY DESTINATION astra_update
+    RUNTIME DESTINATION astra_update
+)
+
+if(NOT SKBUILD)
+    # Keep direct CMake builds importable from the source tree.
+    add_custom_command(TARGET _astra_update POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:_astra_update>
+            ${CMAKE_SOURCE_DIR}/python/astra_update/$<TARGET_FILE_NAME:_astra_update>
+    )
+endif()
+endif()
