@@ -154,6 +154,7 @@ Document both in the wheel's README.
 | Symptom | Likely cause |
 |---|---|
 | Wheel is missing Python files or the native module | Check the CMake `install()` rules in `lib/CMakeLists.txt` |
+| Ninja reports a missing libusb or yaml-cpp archive with no build rule | The external CMake projects must declare their archive paths in `BUILD_BYPRODUCTS`; use the updated build configuration |
 | `libudev.h` not found | Install `libudev-dev` (Debian/Ubuntu) or `systemd-devel` (Fedora/RHEL/manylinux) |
 | Linux wheel won't upload to PyPI (`linux_x86_64` tag) | It wasn't repaired; use Method A or run `auditwheel repair` |
 | `ImportError: DLL load failed` on Windows | Run `delvewheel repair`, and check for a missing Visual C++ runtime |
