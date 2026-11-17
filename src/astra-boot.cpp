@@ -25,7 +25,7 @@ int main(int argc, char* argv[])
         ("C,continuous", "Enabled updating multiple devices", cxxopts::value<bool>()->default_value("false"))
         ("h,help", "Print usage")
         ("T,temp-dir", "Temporary directory", cxxopts::value<std::string>()->default_value(""))
-        ("M,manifest", "Manifest file path", cxxopts::value<std::string>())
+        ("M,manifest", "Ignored; accepted for compatibility. Boot images use the manifest.yaml in their own directory", cxxopts::value<std::string>())
         ("u,usb-debug", "Enable USB debug logging", cxxopts::value<bool>()->default_value("false"))
         ("S,simple-progress", "Disable progress bars and report progress messages", cxxopts::value<bool>()->default_value("false"))
         ("o,boot-command", "Boot command", cxxopts::value<std::string>()->default_value(""))
@@ -88,9 +88,9 @@ int main(int argc, char* argv[])
         simpleProgress = true;
     }
 
-    std::string manifest = "";
     if (result.count("manifest")) {
-        manifest = result["manifest"].as<std::string>();
+        std::cerr << "Warning: --manifest is ignored by astra-boot; boot images use the "
+                     "manifest.yaml in their own directory" << std::endl;
     }
 
     // DynamicProgress to manage multiple progress bars
@@ -159,6 +159,8 @@ int main(int argc, char* argv[])
             {
                 astra_cli::ReportImageProgress(deviceResponse, simpleProgress,
                     dynamicProgress, progressBars);
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL) {
+                astra_cli::ReportImageSendFailure(deviceResponse, dynamicProgress, progressBars);
             }
         }
     }
