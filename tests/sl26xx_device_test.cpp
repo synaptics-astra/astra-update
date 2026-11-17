@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -308,6 +309,52 @@ int main(int argc, char **argv)
     });
     suite.Add("fastboot-reentry-timeout-fails-and-suggests-fastboot-reboot-false", [] {
         RequireFastbootReentryTimeoutExplainsFix();
+    });
+    // Boot image directories load recursively, so nested files have names
+    // like "keys/readme.txt". The BootROM payload lookups must only consider
+    // top-level files, or a directory name could satisfy a substring match.
+    suite.Add("bootrom-payload-lookup-ignores-nested-files", [] {
+        test::TempDirectory directory;
+        test::WriteBootManifest(directory, test::BootManifest());
+        directory.Write("spk.bin", "spk-payload");
+        directory.Write("m52bl.bin", "m52bl-payload");
+        directory.Write(std::filesystem::path("keys") / "readme.txt", "not a key");
+        auto image = std::make_shared<AstraBootImage>(directory.Path().string());
+        REQUIRE(image->Load());
+
+        auto usb = std::make_unique<BootRomUSB>(kKeyResendSpkVersion);
+        auto *usbProbe = usb.get();
+        auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
+            true, "", false);
+
+        REQUIRE(device->Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == -1);
+        REQUIRE(usbProbe->Writes().empty());
+        REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_BOOT_FAIL);
+        device->Close();
+    });
+    suite.Add("bootrom-payload-lookup-uses-top-level-fallback-over-nested-file", [] {
+        test::TempDirectory directory;
+        test::WriteBootManifest(directory, test::BootManifest());
+        directory.Write("board_key.bin", "key-payload");
+        directory.Write(std::filesystem::path("keys") / "key.bin", "nested key");
+        directory.Write("spk.bin", "spk-payload");
+        directory.Write("m52bl.bin", "m52bl-payload");
+        auto image = std::make_shared<AstraBootImage>(directory.Path().string());
+        REQUIRE(image->Load());
+
+        auto usb = std::make_unique<BootRomUSB>(kKeyResendSpkVersion - 1);
+        auto *usbProbe = usb.get();
+        auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
+            true, "", false);
+
+        REQUIRE(device->Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == 1);
+        const auto writes = usbProbe->Writes();
+        REQUIRE(UploadOpcodes(writes) == std::vector<uint8_t>({0x01, 0x02, 0x03, 0x04}));
+        // The key upload carries the top-level file's payload.
+        const std::string payload = "key-payload";
+        REQUIRE(writes[0].size() >= payload.size());
+        REQUIRE(std::string(writes[0].end() - payload.size(), writes[0].end()) == payload);
+        device->Close();
     });
     suite.Add("old-spk-does-not-resend-key", [] {
         RequireBootROMUploadSequence(kKeyResendSpkVersion - 1, {0x01, 0x02, 0x03, 0x04});

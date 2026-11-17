@@ -1043,6 +1043,16 @@ private:
         return true;
     }
 
+    // BootROM-stage payloads (key, SPK, M52BL, SysMgr, BL, TZK) are the files
+    // at the top of the boot image directory. Since boot image directories
+    // are loaded recursively, nested files have relative names such as
+    // "keys/readme.txt"; skip them so the substring fallbacks below cannot
+    // match a directory name.
+    static bool IsTopLevelBootImage(const Image &image)
+    {
+        return image.GetName().find('/') == std::string::npos;
+    }
+
     const Image *FindKeyBootImage(const AstraBootImage &bootImage)
     {
         static const std::array<const char *, 1> kPreferredNames = {
@@ -1050,6 +1060,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1059,6 +1072,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("key") != std::string::npos) {
                 return &image;
@@ -1075,6 +1091,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1084,6 +1103,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("spk") != std::string::npos) {
                 return &image;
@@ -1100,6 +1122,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1109,6 +1134,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("m52") != std::string::npos && imageName.find("bl") != std::string::npos) {
                 return &image;
@@ -1181,6 +1209,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredSysMgrNames) {
                 if (imageName == preferredName) {
@@ -1190,6 +1221,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("sysmgr") != std::string::npos)
             {
@@ -1240,6 +1274,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1249,6 +1286,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("bl") != std::string::npos &&
                 imageName.find("m52") == std::string::npos &&
@@ -1267,6 +1307,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1276,6 +1319,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("tzk") != std::string::npos) {
                 return &image;
