@@ -52,7 +52,10 @@ manifests; other chips default to ``false``. An explicit
 ``--fastboot_reboot true`` is rejected for non-SL261x chips. This check uses
 the chip resolved from ``--sdk_config`` or its ``--chip`` override.
 Use ``--fastboot_reboot false`` when packaging older U-Boot builds that do not
-support this flow. This flag describes the USB boot image, not the flashed image.
+support this flow. With such a U-Boot and ``fastboot_reboot: true``, the flash
+itself still runs, but the update is reported as failed after the eight-minute
+wait; the failure message points at this option. This flag describes the USB
+boot image, not the flashed image.
 
 ### Generating manifests during a build
 

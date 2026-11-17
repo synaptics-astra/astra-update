@@ -6,6 +6,7 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -220,6 +221,65 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     device->Close();
 }
 
+// A U-Boot without fastboot re-entry support flashes but never returns to
+// fastboot. The timeout failure must say how to stop that happening.
+void RequireFastbootReentryTimeoutExplainsFix()
+{
+    test::TempDirectory directory;
+    auto fields = test::BootManifest();
+    fields["fastboot_vendor_id"] = "18D1";
+    fields["fastboot_product_id"] = "4EE0";
+    fields["fastboot_reboot"] = "true";
+    test::WriteBootManifest(directory, fields);
+    auto bootImage = std::make_shared<AstraBootImage>(directory.Path().string());
+    REQUIRE(bootImage->Load());
+
+    auto usb = std::make_unique<FastbootUSB>();
+    auto *usbProbe = usb.get();
+    auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
+        false, "", false);
+    device->SetPostFlashFastbootTimeout(std::chrono::milliseconds(100));
+    std::promise<void> waiting;
+    auto waitingFuture = waiting.get_future();
+    std::mutex messageMutex;
+    std::string failureMessage;
+    device->SetStatusCallback([&](AstraDeviceManagerResponse response) {
+        if (response.IsDeviceResponse()) {
+            const auto event = response.GetDeviceResponse();
+            if (event.m_status == ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE && event.m_imageName.empty()) {
+                waiting.set_value();
+            } else if (event.m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL) {
+                std::lock_guard<std::mutex> lock(messageMutex);
+                failureMessage = event.m_message;
+            }
+        }
+    });
+    device->SetRegistrationCallbacks([](const std::string &) {}, [](const std::string &) {},
+        [](const std::string &) {}, [](const std::string &) {});
+
+    REQUIRE(device->Boot(bootImage, ASTRA_DEVICE_BOOT_STAGE_AUTO) == 0);
+    REQUIRE(device->Update(std::make_shared<FinalFlashImage>(directory, true)) == 0);
+    usbProbe->requestImage.store(true);
+    REQUIRE(waitingFuture.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+
+    // No Rebind(): the device never re-enters fastboot.
+    auto completion = std::async(std::launch::async, [&] { return device->WaitForCompletion(); });
+    const bool completed = completion.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+    if (!completed) {
+        device->Close();
+    }
+    REQUIRE(completed);
+    REQUIRE(completion.get() == -1);
+    REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_FAIL);
+    {
+        std::lock_guard<std::mutex> lock(messageMutex);
+        REQUIRE(failureMessage.find("post-flash fastboot re-entry") != std::string::npos);
+        REQUIRE(failureMessage.find("may have been written") != std::string::npos);
+        REQUIRE(failureMessage.find("--fastboot_reboot false") != std::string::npos);
+    }
+    device->Close();
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -245,6 +305,9 @@ int main(int argc, char **argv)
     });
     suite.Add("disabled-reset-without-fastboot-reboot-keeps-final-boot-wait", [] {
         RequireFlashCompletion("false", false);
+    });
+    suite.Add("fastboot-reentry-timeout-fails-and-suggests-fastboot-reboot-false", [] {
+        RequireFastbootReentryTimeoutExplainsFix();
     });
     suite.Add("old-spk-does-not-resend-key", [] {
         RequireBootROMUploadSequence(kKeyResendSpkVersion - 1, {0x01, 0x02, 0x03, 0x04});

@@ -92,6 +92,11 @@ public:
         m_imageRequestIdleTimeout = timeout;
     }
 
+    // How long an SL26xx update with fastboot_reboot waits for the device to
+    // re-enter fastboot after flashing. Other series ignore it. Tests shorten
+    // it; call before Update().
+    virtual void SetPostFlashFastbootTimeout(std::chrono::milliseconds /*timeout*/) {}
+
     virtual std::string GetDeviceName()
     {
         return m_deviceName;

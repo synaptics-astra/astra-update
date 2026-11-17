@@ -538,12 +538,18 @@ private:
     // needlessly long when the real signal is missed.
     static constexpr std::chrono::seconds kPostFlashGracePeriod{300};
     static constexpr std::chrono::seconds kPostFlashFastbootTimeout{480};
+    std::atomic<std::chrono::milliseconds> m_postFlashFastbootTimeout{kPostFlashFastbootTimeout};
 
     // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
     // arrives on this device's registered USB path.
     std::atomic<bool> m_finalBootDetected{false};
     std::mutex m_finalBootMutex;
     std::condition_variable m_finalBootCV;
+
+    void SetPostFlashFastbootTimeout(std::chrono::milliseconds timeout) override
+    {
+        m_postFlashFastbootTimeout.store(timeout);
+    }
 
     void NotifyFinalBootDetected() override
     {
@@ -560,6 +566,7 @@ private:
     {
         ASTRA_LOG;
 
+        const std::chrono::milliseconds timeout = m_postFlashFastbootTimeout.load();
         std::string failure;
         if (!m_rebindArmed.load() && !ArmRebindMode("post-flash fastboot re-entry")) {
             failure = "Cannot wait for post-flash fastboot re-entry without a registered UUID";
@@ -567,7 +574,7 @@ private:
             bool reenteredFastboot = false;
             {
                 std::unique_lock<std::mutex> lock(m_rebindMutex);
-                m_rebindCV.wait_for(lock, kPostFlashFastbootTimeout, [this] {
+                m_rebindCV.wait_for(lock, timeout, [this] {
                     return m_rebindReady.load() || m_shutdown.load() || !m_running.load();
                 });
                 reenteredFastboot = m_rebindReady.exchange(false);
@@ -579,7 +586,15 @@ private:
             if (!m_running.load()) {
                 failure = "Fastboot connection failed while waiting for post-flash re-entry";
             } else if (!reenteredFastboot) {
-                failure = "Timeout waiting for post-flash fastboot re-entry";
+                // The write may well have finished: a U-Boot without fastboot
+                // re-entry support runs the flash but never comes back.
+                failure = "Timed out after " +
+                    std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                        timeout).count()) +
+                    " s waiting for post-flash fastboot re-entry. The image may have been written."
+                    " If this boot image's U-Boot cannot re-enter fastboot after flashing,"
+                    " set fastboot_reboot: false in its manifest"
+                    " (generate_manifest.py --fastboot_reboot false)";
             } else if (!m_resetWhenComplete) {
                 // Re-entry confirms the write finished; reset is disabled, so
                 // leave the board in U-Boot fastboot mode.
