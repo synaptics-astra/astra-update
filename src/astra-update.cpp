@@ -223,6 +223,8 @@ int main(int argc, char* argv[])
             {
                 astra_cli::ReportImageProgress(deviceResponse, simpleProgress,
                     dynamicProgress, progressBars);
+            } else if (deviceResponse.m_status == ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL) {
+                astra_cli::ReportImageSendFailure(deviceResponse, dynamicProgress, progressBars);
             }
         }
     }
