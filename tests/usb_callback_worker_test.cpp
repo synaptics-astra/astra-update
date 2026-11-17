@@ -59,7 +59,9 @@ int main(int argc, char **argv)
                 changed.notify_all();
             });
         });
-        usb.StartWorker();
+        // Queue everything before starting the worker: otherwise the worker
+        // can run the event callback (which queues 4) before 2 and 3 are
+        // queued, giving 1, 4, 2, 3.
         usb.QueueEvent(USBDevice::USB_DEVICE_EVENT_INTERRUPT, {});
         usb.QueueAction([&] {
             std::lock_guard<std::mutex> lock(mutex);
@@ -70,6 +72,7 @@ int main(int argc, char **argv)
             std::lock_guard<std::mutex> lock(mutex);
             sequence.push_back(3);
         });
+        usb.StartWorker();
         {
             std::unique_lock<std::mutex> lock(mutex);
             REQUIRE(changed.wait_for(lock, std::chrono::seconds(2), [&] {
