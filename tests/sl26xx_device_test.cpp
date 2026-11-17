@@ -170,7 +170,9 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     usbProbe->requestImage.store(true);
     REQUIRE(waitingFuture.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
 
-    const bool useFastboot = flag == "true" && reset;
+    // Fastboot re-entry confirms completion whether or not reset is enabled;
+    // only the reboot that follows depends on it.
+    const bool useFastboot = flag == "true";
     FastbootUSB *reboundProbe = nullptr;
     if (useFastboot) {
         auto rebound = std::make_unique<FastbootUSB>();
@@ -197,13 +199,16 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     REQUIRE(device->GetDeviceStatus() == (failed
         ? ASTRA_DEVICE_STATUS_UPDATE_FAIL : ASTRA_DEVICE_STATUS_UPDATE_COMPLETE));
     if (!failed) {
-        REQUIRE(completionMessage == "Success");
+        REQUIRE(completionMessage == (useFastboot && !reset
+            ? "Reset disabled: device left in U-Boot fastboot mode" : "Success"));
     }
     REQUIRE(legacyRegistrations.load() == (useFastboot ? 0 : 1));
-    if (reboundProbe && openRebind) {
+    if (reboundProbe && openRebind && reset) {
         REQUIRE(reboundProbe->Writes() == std::vector<std::vector<uint8_t>>{
             {'r', 'e', 'b', 'o', 'o', 't'}});
         REQUIRE(reboundProbe->ReadTimeouts().size() == 1);
+    } else if (reboundProbe && openRebind) {
+        REQUIRE(reboundProbe->Writes().empty());
     }
     device->Close();
 }
@@ -228,8 +233,11 @@ int main(int argc, char **argv)
     suite.Add("post-flash-fastboot-open-failure-does-not-report-success", [] {
         RequireFlashCompletion("true", true, true, false);
     });
-    suite.Add("disabled-reset-does-not-send-fastboot-reboot", [] {
+    suite.Add("disabled-reset-completes-on-fastboot-reentry-without-reboot", [] {
         RequireFlashCompletion("true", false);
+    });
+    suite.Add("disabled-reset-without-fastboot-reboot-keeps-final-boot-wait", [] {
+        RequireFlashCompletion("false", false);
     });
     suite.Add("old-spk-does-not-resend-key", [] {
         RequireBootROMUploadSequence(kKeyResendSpkVersion - 1, {0x01, 0x02, 0x03, 0x04});

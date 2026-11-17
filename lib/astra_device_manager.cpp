@@ -59,6 +59,15 @@ void SetUSBTransportFactoryForTesting(USBTransportFactory factory)
     TransportFactory() = std::move(factory);
 }
 
+std::string FlashCompletionCommand(AstraDeviceSeries series, bool fastbootReboot, bool resetWhenComplete)
+{
+    const bool fastbootReentry = series == ASTRA_SERIES_SL26XX && fastbootReboot;
+    if (!resetWhenComplete && !fastbootReentry) {
+        return "";
+    }
+    return AstraDevice::GetFlashCompletionCommand(series, fastbootReboot);
+}
+
 class AstraDeviceManager::AstraDeviceManagerImpl {
 public:
     AstraDeviceManagerImpl(std::function<void(AstraDeviceManagerResponse)> responseCallback,
@@ -495,14 +504,12 @@ private:
 
         m_deviceSeries = DetectDeviceSeries(m_bootImage->GetChipName());
 
-        if (m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE && m_flashImage &&
-            m_flashImage->GetResetWhenComplete())
-        {
+        if (m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE && m_flashImage) {
             // The flash command itself is series-agnostic; append the
             // device-specific tail here (e.g. reset vs re-enter fastboot)
             // now that the series is known.
-            m_bootCommand += AstraDevice::GetFlashCompletionCommand(m_deviceSeries,
-                m_bootImage->GetFastbootReboot());
+            m_bootCommand += FlashCompletionCommand(m_deviceSeries,
+                m_bootImage->GetFastbootReboot(), m_flashImage->GetResetWhenComplete());
         }
 
         bootImageDescription += "    Device Series: " + AstraDevice::AstraDeviceSeriesToString(m_deviceSeries) + "\n";

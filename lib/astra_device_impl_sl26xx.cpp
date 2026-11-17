@@ -580,6 +580,11 @@ private:
                 failure = "Fastboot connection failed while waiting for post-flash re-entry";
             } else if (!reenteredFastboot) {
                 failure = "Timeout waiting for post-flash fastboot re-entry";
+            } else if (!m_resetWhenComplete) {
+                // Re-entry confirms the write finished; reset is disabled, so
+                // leave the board in U-Boot fastboot mode.
+                log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing; reset disabled, not rebooting" << endLog;
+                m_updateCompletionMessage = "Reset disabled: device left in U-Boot fastboot mode";
             } else {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing, sending reboot" << endLog;
                 std::lock_guard<std::mutex> lock(m_deviceMutex);
@@ -607,7 +612,7 @@ private:
         ReportStatus(ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE, 0, "",
             "Device processing final image");
 
-        if (m_fastbootReboot && !m_bootOnly && m_resetWhenComplete) {
+        if (m_fastbootReboot && !m_bootOnly) {
             WaitForFastbootReboot();
             m_rebindArmed.store(false);
             m_running.store(false);
@@ -1501,7 +1506,7 @@ private:
             })) {
             log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: failed to open new device after rebind" << endLog;
             m_fastbootDevice.reset();
-            if (m_fastbootReboot && !m_bootOnly && m_resetWhenComplete &&
+            if (m_fastbootReboot && !m_bootOnly &&
                 m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE)
             {
                 m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;

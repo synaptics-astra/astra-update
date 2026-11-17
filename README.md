@@ -36,12 +36,16 @@ When using [generate_manifest.py](tools/generate_manifest.py), pass
 If the option is not supplied, the field is omitted for legacy compatibility.
 
 Boot manifests can declare ``fastboot_reboot: true`` for SL261x U-Boot builds
-that support returning to fastboot after flashing. With reset enabled, the host
-waits up to eight minutes for fastboot re-entry, sends ``reboot``, reads its
-acknowledgement, and completes without further USB I/O. A timeout or reboot failure is
-reported as an update failure. Missing or ``false`` retains the existing plain
-reset and Linux USB gadget detection, including its five-minute fallback.
-Other device series and updates with reset disabled do not use fastboot reboot.
+that support returning to fastboot after flashing. The host waits up to eight
+minutes for fastboot re-entry, which confirms the flash write has finished.
+With reset enabled it then sends ``reboot``, reads its acknowledgement, and
+completes without further USB I/O. With reset disabled it does not reboot: the
+update completes and the board is left in U-Boot fastboot mode. A timeout or
+reboot failure is reported as an update failure. Missing or ``false`` retains
+the existing plain reset and Linux USB gadget detection, including its
+five-minute fallback; with reset disabled no gadget appears, so such updates
+always wait the full five minutes. Other device series do not use fastboot
+reboot.
 
 The generator emits ``fastboot_reboot: true`` by default only for SL261x boot
 manifests; other chips default to ``false``. An explicit
@@ -116,7 +120,8 @@ with an empty image name during its final flash/reboot wait. These events do not
 claim that the protocol can distinguish individual erase and write phases.
 
 For SL261x updates with `fastboot_reboot: true`, completion is confirmed when
-U-Boot acknowledges the host's fastboot `reboot` command. Otherwise, the
+the device re-enters fastboot after flashing (and, with reset enabled, when
+U-Boot acknowledges the host's fastboot `reboot` command). Otherwise, the
 post-flash Linux USB gadget (`1D6B:0104`) on the updating device's USB port path
 ends the final wait. Detection uses enumeration metadata only: it does not open
 or claim the gadget, so denied libusb access does not hide an enumerated

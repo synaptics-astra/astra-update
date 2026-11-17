@@ -235,5 +235,19 @@ int main(int argc, char **argv)
         REQUIRE(responses.CountDeviceStatus(ASTRA_DEVICE_STATUS_BOOT_FAIL) == 1);
         REQUIRE(std::filesystem::exists(fixture.managerTempDirectory / "astra_device_manager.log"));
     });
+    suite.Add("flash-completion-command-by-series-and-reset", [] {
+        const std::string reset = "; sleep 1; reset";
+        const std::string fastboot = "; sleep 1; fastboot -l 0x10000000 -s 0x8000000 usb 0";
+        // series, fastboot_reboot, reset_when_complete -> appended command
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL16XX, false, true) == reset);
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL16XX, true, true) == reset);
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL16XX, false, false).empty());
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL16XX, true, false).empty());
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL26XX, false, true) == reset);
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL26XX, true, true) == fastboot);
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL26XX, false, false).empty());
+        // Reset disabled still re-enters fastboot so the write can be confirmed.
+        REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL26XX, true, false) == fastboot);
+    });
     return suite.Run(argc, argv);
 }
