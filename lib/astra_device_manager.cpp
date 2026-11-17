@@ -105,22 +105,11 @@ public:
                 }
                 throw std::runtime_error("No boot image found for chip: " + m_flashImage->GetChipName());
             } else if (bootImages.size() > 1) {
-                m_bootImage = bootImages[0];
                 for (const auto& bootImage : bootImages) {
                     log(ASTRA_LOG_LEVEL_INFO) << "Boot Image: " << bootImage->GetChipName() << " " << bootImage->GetBoardName() << endLog;
-                    if (bootImage->GetUbootVariant() == ASTRA_UBOOT_VARIANT_SYNAPTICS && bootImage->GetUEnvSupport()) {
-                        // Boot bootImages with Synaptics u-boot variant is preferred
-                        m_bootImage = bootImage;
-                        break;
-                    } else if (bootImage->GetUEnvSupport()) {
-                        // Boot bootImages with uEnv support is preferred
-                        m_bootImage = bootImage;
-                    } else if (!m_bootImage->GetUEnvSupport() && bootImage->GetUbootConsole() == ASTRA_UBOOT_CONSOLE_USB) {
-                        // Boot bootImages with USB console is preferred over UART
-                        // But only if there is no uEnv support
-                        m_bootImage = bootImage;
-                    }
                 }
+                m_bootImage = BootImageCollection::SelectPreferredBootImage(bootImages);
+                log(ASTRA_LOG_LEVEL_INFO) << "Selected boot image: " << m_bootImage->GetID() << endLog;
             } else {
                 // Try the only option
                 m_bootImage = bootImages[0];

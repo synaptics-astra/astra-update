@@ -26,6 +26,13 @@ public:
         AstraSecureBootVersion secureBoot, AstraMemoryLayout memoryLayout, AstraMemoryDDRType memoryDDRType,
         std::string boardName, std::optional<FlashImageType> updateType = std::nullopt) const;
 
+    // Pick one image from a GetBootImagesForChip() result. Preference order:
+    // Synaptics U-Boot with uEnv support, then uEnv support, then USB console.
+    // Ties go to the largest memory layout, then to the earliest image in
+    // collection order (directory path order). Returns nullptr if empty.
+    static std::shared_ptr<AstraBootImage> SelectPreferredBootImage(
+        const std::vector<std::shared_ptr<AstraBootImage>> &bootImages);
+
 private:
     std::string m_path;
     std::vector<std::shared_ptr<AstraBootImage>> m_bootImages;

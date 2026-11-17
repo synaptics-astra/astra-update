@@ -49,10 +49,17 @@ void BootImageCollection::Load()
 
     if (std::filesystem::exists(dir)) {
         if (std::filesystem::is_directory(dir)) {
+            // directory_iterator order is unspecified and differs between
+            // filesystems; sort so selection ties resolve the same everywhere.
+            std::vector<std::filesystem::path> children;
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
                 if (std::filesystem::is_directory(entry.path())) {
-                    LoadBootImage(entry.path());
+                    children.push_back(entry.path());
                 }
+            }
+            std::sort(children.begin(), children.end());
+            for (const auto& child : children) {
+                LoadBootImage(child);
             }
         } else {
             LoadBootImage(dir);
@@ -146,6 +153,39 @@ std::vector<std::shared_ptr<AstraBootImage>> BootImageCollection::GetBootImagesF
     }
 
     return bootImages;
+}
+
+std::shared_ptr<AstraBootImage> BootImageCollection::SelectPreferredBootImage(
+    const std::vector<std::shared_ptr<AstraBootImage>> &bootImages)
+{
+    const auto preference = [](const AstraBootImage &image) {
+        if (image.GetUbootVariant() == ASTRA_UBOOT_VARIANT_SYNAPTICS && image.GetUEnvSupport()) {
+            return 3;
+        } else if (image.GetUEnvSupport()) {
+            return 2;
+        } else if (image.GetUbootConsole() == ASTRA_UBOOT_CONSOLE_USB) {
+            return 1;
+        }
+        return 0;
+    };
+
+    std::shared_ptr<AstraBootImage> selected;
+    for (const auto &candidate : bootImages) {
+        if (!selected) {
+            selected = candidate;
+            continue;
+        }
+        const int candidatePreference = preference(*candidate);
+        const int selectedPreference = preference(*selected);
+        if (candidatePreference > selectedPreference
+            || (candidatePreference == selectedPreference
+                && MemoryLayoutMegabytes(candidate->GetMemoryLayout())
+                    > MemoryLayoutMegabytes(selected->GetMemoryLayout())))
+        {
+            selected = candidate;
+        }
+    }
+    return selected;
 }
 
 BootImageCollection::~BootImageCollection()
