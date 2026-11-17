@@ -184,8 +184,7 @@ void AstraDeviceImpl::RunImageRequestLoop()
         std::string requestedImageName;
         uint8_t imageType = 0;
 
-        const auto timeout = std::chrono::seconds(10);
-        bool gotRequest = WaitForImageRequest(requestedImageName, imageType, timeout);
+        bool gotRequest = WaitForImageRequest(requestedImageName, imageType, m_imageRequestIdleTimeout);
 
         if (!m_running.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Image request loop: shutting down" << endLog;
@@ -212,8 +211,10 @@ void AstraDeviceImpl::RunImageRequestLoop()
                 // device may still be writing the final image to flash, so
                 // leave m_running / the device event alone here and let the
                 // real disconnect handler trigger the completion status.
+                // Without a reset no disconnect will ever arrive, so the
+                // idle timeout is the only completion signal available.
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
-                if (m_completeOnIdleTimeout) {
+                if (m_completeOnIdleTimeout || !m_resetWhenComplete) {
                     m_running.store(false);
                     SignalDeviceEvent();
                 }

@@ -32,8 +32,9 @@ public:
             keepImageRequestLoopAfterBoot, leaveFastbootIdle)
     {
         m_sizeRequestImageFilename = "07_IMAGE";
-        // SL16XX always gets a real USB disconnect event, so wait for that
-        // rather than the image-request loop's idle timeout.
+        // SL16XX gets a real USB disconnect event when the update resets the
+        // device, so wait for that rather than the image-request loop's idle
+        // timeout. Updates with reset disabled still complete on idle.
         m_completeOnIdleTimeout = false;
     }
 

@@ -85,6 +85,13 @@ public:
      */
     virtual void NotifyFinalBootDetected() {}
 
+    // How long the image-request loop waits for the next request before
+    // treating the device as idle. Tests shorten it; call before Boot().
+    void SetImageRequestIdleTimeout(std::chrono::milliseconds timeout)
+    {
+        m_imageRequestIdleTimeout = timeout;
+    }
+
     virtual std::string GetDeviceName()
     {
         return m_deviceName;
@@ -236,7 +243,11 @@ protected:
     // an async disconnect event (e.g. SL26XX bulk-only fastboot). SL16XX
     // sets this false since it always gets a real USB disconnect event, so
     // completion should wait for that instead of guessing on an idle timeout.
+    // When the update does not reset the device there is no disconnect to
+    // wait for, so the idle timeout completes the update regardless.
     bool m_completeOnIdleTimeout = true;
+
+    std::chrono::milliseconds m_imageRequestIdleTimeout{std::chrono::seconds(10)};
 
     bool m_uEnvSupport = false;
     bool m_resetWhenComplete = false;

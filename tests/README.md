@@ -52,8 +52,8 @@ already-configured build tree.
 
 ## Behavior-to-test matrix
 
-There are 726 named cases across 19 executables, including 327 phase 3,
-59 phase 4, and 10 phase 5 SL16xx cases. Table-driven cases also make
+There are 731 named cases across 19 executables, including 327 phase 3,
+59 phase 4, and 14 phase 5 SL16xx cases. Table-driven cases also make
 multiple assertions across supported enum combinations.
 
 | Suite | Cases | Behaviors asserted |
@@ -75,8 +75,8 @@ multiple assertions across supported enum combinations.
 | [fastboot-device](fastboot_device_test.cpp) | 34 | Open/close/reopen and disconnect events; getvar/oem/reboot framing, INFO/OKAY/FAIL/short/unknown responses, timeout forwarding and 63/64/65-byte commands; serial probe ownership; exact-size download negotiation, empty files, 4-MiB chunk boundaries, payload/progress, short/failed I/O, disconnect, malformed DATA lengths, changing/missing files and final ACK failures. |
 | [usb-callback-worker](usb_callback_worker_test.cpp) | 5 | Queued event-data ownership and callback/action thread identity; FIFO actions, nested queueing outside the lock, restartable/idempotent startup and shutdown, drain-before-join and ignored empty actions. |
 | [usb-transport](usb_transport_test.cpp) | 5 | Handle-free completion observation through the shared Windows/POSIX open gate, VID/PID selectivity, port identity across devices/re-enumeration, and default/cleared observer behavior. No live USB device is opened. |
-| [astra-device-impl](astra_device_impl_test.cpp) | 20 | Generated/supplied uEnv and UUID reuse; boot/update list construction, Linux boot-only/update final-image choice, request name normalization and payload selection, status sequences, final-image and size-request completion gates, send/missing-image failures, suppressed events, keep-serving behavior, idle-timeout policy, prompt thread shutdown and idempotent close. |
-| [sl16xx-device](sl16xx_device_test.cpp) | 10 | Public boot/close lifecycle; SL16xx interrupt request decoding, padding/truncated packet handling, ordered back-to-back image requests, binary console reads/writes, image size header and payload, `07_IMAGE` size handshake/status suppression, missing-image failure, no-device/cancel/error disconnects, miniloader reconnect handling, and concurrent-close/completion-wait wakeup. |
+| [astra-device-impl](astra_device_impl_test.cpp) | 21 | Generated/supplied uEnv and UUID reuse; boot/update list construction, Linux boot-only/update final-image choice, request name normalization and payload selection, status sequences, final-image and size-request completion gates, send/missing-image failures, suppressed events, keep-serving behavior, idle-timeout policy, prompt thread shutdown and idempotent close. |
+| [sl16xx-device](sl16xx_device_test.cpp) | 14 | Public boot/close lifecycle; update completion on idle when reset is disabled and on disconnect when it is enabled (UART console and uEnv); SL16xx interrupt request decoding, padding/truncated packet handling, ordered back-to-back image requests, binary console reads/writes, image size header and payload, `07_IMAGE` size handshake/status suppression, missing-image failure, no-device/cancel/error disconnects, miniloader reconnect handling, and concurrent-close/completion-wait wakeup. |
 
 Fixtures own unique temporary directories and restore permissions, log stores,
 streams and workers on failure. Waiters are explicitly woken and joined;

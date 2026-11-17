@@ -54,6 +54,7 @@ public:
 
     void SetSizeRequest(std::string name) { m_sizeRequestImageFilename = std::move(name); }
     void SetCompleteOnIdleTimeout(bool value) { m_completeOnIdleTimeout = value; }
+    void SetResetWhenComplete(bool value) { m_resetWhenComplete = value; }
     void SetStatus(AstraDeviceStatus status) { m_status = status; }
     void SetDeviceDirectory(const std::filesystem::path &path) { m_deviceDir = path.string(); }
     void SetUuid(std::string uuid) { m_updateSessionUuid = std::move(uuid); }
@@ -604,6 +605,7 @@ int main(int argc, char **argv)
     suite.Add("update-idle-timeout-can-await-real-disconnect", [] {
         RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
         probe.SetCompleteOnIdleTimeout(false);
+        probe.SetResetWhenComplete(true);
         probe.QueueTimeout();
         REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) == 0);
         REQUIRE(probe.WaitForRequestCount(1));
@@ -612,6 +614,18 @@ int main(int argc, char **argv)
         REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
         probe.Stop();
         REQUIRE(!probe.Running());
+        probe.Close();
+    });
+    suite.Add("update-idle-timeout-completes-when-no-reset-will-disconnect", [] {
+        RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
+        probe.SetCompleteOnIdleTimeout(false);
+        probe.SetResetWhenComplete(false);
+        probe.QueueTimeout();
+        REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) == 0);
+        REQUIRE(probe.WaitForRequestCount(1));
+        probe.JoinLoop();
+        REQUIRE(!probe.Running());
+        REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
         probe.Close();
     });
     suite.Add("stop-wakes-blocked-request-hook-and-close-is-idempotent", [] {
