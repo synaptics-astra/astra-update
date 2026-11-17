@@ -137,7 +137,7 @@ std::shared_ptr<FlashImage> FlashImage::FlashImageFactory(std::string imagePath,
         // then have the command line options take precedence.
          for (YAML::const_iterator it = manifestNode.begin(); it != manifestNode.end(); ++it) {
             std::string key = it->first.as<std::string>();
-            const YAML::Node& value = it->second;
+            const YAML::Node value = it->second;
 
             if (configMap.find(key) == configMap.end()) {
                 if (value.IsScalar()) {
