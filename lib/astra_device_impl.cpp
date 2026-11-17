@@ -175,7 +175,13 @@ void AstraDeviceImpl::RunImageRequestLoop()
     ASTRA_LOG;
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "Signal image request thread ready" << endLog;
-    m_imageRequestThreadReady.store(true);
+    {
+        // Publish under the CV's mutex: otherwise the store and notify can
+        // land between StartImageRequestThread()'s predicate check and its
+        // wait, and that wakeup is lost for good.
+        std::lock_guard<std::mutex> lock(m_imageRequestThreadReadyMutex);
+        m_imageRequestThreadReady.store(true);
+    }
     m_imageRequestThreadReadyCV.notify_all();
 
     bool waitForSizeRequest = false;
