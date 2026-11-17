@@ -52,7 +52,7 @@ already-configured build tree.
 
 ## Behavior-to-test matrix
 
-There are 744 named cases across 20 executables, including 327 phase 3,
+There are 746 named cases across 20 executables, including 327 phase 3,
 59 phase 4, and 14 phase 5 SL16xx cases. Table-driven cases also make
 multiple assertions across supported enum combinations.
 
@@ -75,7 +75,7 @@ multiple assertions across supported enum combinations.
 | [fastboot-device](fastboot_device_test.cpp) | 34 | Open/close/reopen and disconnect events; getvar/oem/reboot framing, INFO/OKAY/FAIL/short/unknown responses, timeout forwarding and 63/64/65-byte commands; serial probe ownership; exact-size download negotiation, empty files, 4-MiB chunk boundaries, payload/progress, short/failed I/O, disconnect, malformed DATA lengths, changing/missing files and final ACK failures. |
 | [usb-callback-worker](usb_callback_worker_test.cpp) | 5 | Queued event-data ownership and callback/action thread identity; FIFO actions, nested queueing outside the lock, restartable/idempotent startup and shutdown, drain-before-join and ignored empty actions. |
 | [usb-transport](usb_transport_test.cpp) | 5 | Handle-free completion observation through the shared Windows/POSIX open gate, VID/PID selectivity, port identity across devices/re-enumeration, and default/cleared observer behavior. No live USB device is opened. |
-| [astra-device-impl](astra_device_impl_test.cpp) | 23 | Generated/supplied uEnv and UUID reuse; boot/update list construction, Linux boot-only/update final-image choice, request name normalization and most-specific-name payload selection, status sequences, final-image and size-request completion gates, send/missing-image failures, suppressed events, keep-serving behavior, idle-timeout policy, prompt thread shutdown and idempotent close. |
+| [astra-device-impl](astra_device_impl_test.cpp) | 25 | Generated/supplied uEnv and UUID reuse; boot/update list construction, Linux boot-only/update final-image choice, request name normalization and most-specific-name payload selection, status sequences, final-image and size-request completion gates, send/missing-image failures, suppressed events, keep-serving behavior, idle-timeout policy, prompt thread shutdown and idempotent close. |
 | [sl16xx-device](sl16xx_device_test.cpp) | 14 | Public boot/close lifecycle; update completion on idle when reset is disabled and on disconnect when it is enabled (UART console and uEnv); SL16xx interrupt request decoding, padding/truncated packet handling, ordered back-to-back image requests, binary console reads/writes, image size header and payload, `07_IMAGE` size handshake/status suppression, missing-image failure, no-device/cancel/error disconnects, miniloader reconnect handling, and concurrent-close/completion-wait wakeup. |
 | [astra-device-manager](astra_device_manager_test.cpp) | 7 | Boot-mode manager driven end to end through a fake transport (`SetUSBTransportFactoryForTesting`) and a scripted SL16xx device: success sends SHUTDOWN, `Shutdown()` returns false and the temp directory is removed; a device-reported BOOT_FAIL and a failure the device leaves unreported each produce exactly one failure response, make `Shutdown()` return true and keep the log. The flash completion command for every series/fastboot-reboot/reset combination. A fastboot arrival claims the waiting entry on the same USB path, else the oldest. |
 

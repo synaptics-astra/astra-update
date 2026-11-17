@@ -368,7 +368,15 @@ void AstraDeviceImpl::RunImageRequestLoop()
                 << "'  finalUpdate='" << m_finalUpdateImage << "'" << endLog;
 
             // ---- completion tracking ----
-            if (!m_finalBootImage.empty() &&
+            // Once the update has started, the final boot image (re-served,
+            // or matched by an update image's name) must not move the status
+            // back to BOOT_COMPLETE: that would report BOOT_COMPLETE again and
+            // then UPDATE_START again for the next update image.
+            const bool updateStarted =
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_START ||
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_PROGRESS ||
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
+            if (!updateStarted && !m_finalBootImage.empty() &&
                 image.GetName().find(m_finalBootImage) != std::string::npos)
             {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot image sent" << endLog;
