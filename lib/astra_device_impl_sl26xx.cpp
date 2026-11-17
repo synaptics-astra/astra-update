@@ -1430,13 +1430,25 @@ private:
     // -----------------------------------------------------------------------
     // Virtual hook: WakeImageRequestThread
     // Notify all CVs so a thread blocked in WaitForImageRequest, WaitForRebind,
-    // or any rx-buffer wait wakes up promptly when m_running is cleared by
-    // Close() / shutdown.
+    // WaitForFastbootReboot, WaitForFlashWriteToFinish or any rx-buffer wait
+    // wakes up promptly when m_running / m_shutdown is changed by Close() /
+    // shutdown.
+    //
+    // Each notify is made while holding that CV's mutex. The flags are
+    // atomics written without these mutexes, so a bare notify could land
+    // after a waiter has checked its predicate but before it blocks, and the
+    // waiter would then sleep for its whole timeout (up to 480 s).
     // -----------------------------------------------------------------------
     void WakeImageRequestThread() override
     {
-        m_rebindCV.notify_all();
-        m_finalBootCV.notify_all();
+        {
+            std::lock_guard<std::mutex> lock(m_rebindMutex);
+            m_rebindCV.notify_all();
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_finalBootMutex);
+            m_finalBootCV.notify_all();
+        }
         std::lock_guard<std::mutex> lock(m_rxMutex);
         m_rxCV.notify_all();
     }
@@ -1498,7 +1510,12 @@ private:
             }
             m_running.store(false);
             SignalDeviceEvent();
-            m_rebindCV.notify_all();
+            {
+                // Under the mutex so WaitForRebind / WaitForFastbootReboot
+                // cannot miss the m_running change (see WakeImageRequestThread).
+                std::lock_guard<std::mutex> lock(m_rebindMutex);
+                m_rebindCV.notify_all();
+            }
             return;
         }
 

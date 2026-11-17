@@ -536,9 +536,13 @@ private:
     // -----------------------------------------------------------------------
     // Virtual hook: WakeImageRequestThread
     // Notifies m_imageRequestCV so WaitForImageRequest returns immediately.
+    // The notify is made under m_imageRequestMutex: m_running is cleared
+    // without it, so a bare notify could fall between the waiter's predicate
+    // check and its wait and be lost until the idle timeout.
     // -----------------------------------------------------------------------
     void WakeImageRequestThread() override
     {
+        std::lock_guard<std::mutex> lock(m_imageRequestMutex);
         m_imageRequestCV.notify_all();
     }
 };
