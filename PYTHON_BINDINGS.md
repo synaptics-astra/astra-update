@@ -155,7 +155,9 @@ mgr.update(flash_image, "/path/to/boot/images")
 ```
 
 `load_flash_image()` calls the native `Load()` method and raises `RuntimeError`
-with the library's load diagnostic on failure. When using
+with the library's load diagnostic on failure. `load_spi_flash_image()` and
+`load_emmc_flash_image()` are the same with `config["image_type"]` set to
+`"spi"` or `"emmc"`; they raise `ValueError` if `config` names a different type. When using
 `FlashImage.flash_image_factory()` directly, call `load()` before `mgr.update()`.
 Flash images expose metadata getters, `get_load_error()`, and U-Boot version
 selection through `UbootVersion` and `set_uboot_version()`.
