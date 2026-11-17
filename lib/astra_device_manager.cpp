@@ -16,6 +16,7 @@
 #include <deque>
 #include "astra_device.hpp"
 #include "astra_device_manager.hpp"
+#include "astra_device_manager_internal.hpp"
 #include "boot_image_collection.hpp"
 #include "fastboot_device.hpp"
 #include "libusb_transport.hpp"
@@ -29,6 +30,34 @@
 #include "win_libusb_transport.hpp"
 #include "win_usb_cdc_transport.hpp"
 #endif
+
+namespace {
+
+std::mutex &TransportFactoryMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+USBTransportFactory &TransportFactory()
+{
+    static USBTransportFactory factory;
+    return factory;
+}
+
+USBTransportFactory GetTransportFactory()
+{
+    std::lock_guard<std::mutex> lock(TransportFactoryMutex());
+    return TransportFactory();
+}
+
+} // namespace
+
+void SetUSBTransportFactoryForTesting(USBTransportFactory factory)
+{
+    std::lock_guard<std::mutex> lock(TransportFactoryMutex());
+    TransportFactory() = std::move(factory);
+}
 
 class AstraDeviceManager::AstraDeviceManagerImpl {
 public:
@@ -516,19 +545,24 @@ private:
             vendorProductIds.push_back({kLinuxGadgetVid, kLinuxGadgetPid});
         }
 
+        const USBTransportFactory transportFactory = GetTransportFactory();
+        if (transportFactory) {
+            m_transport = transportFactory(m_transportType, m_usbDebug);
+        } else {
 #if PLATFORM_WINDOWS
-        if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
-            m_transport = std::make_shared<WinUSBCDCTransport>(m_usbDebug);
-        } else {
-            m_transport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
-        }
+            if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+                m_transport = std::make_shared<WinUSBCDCTransport>(m_usbDebug);
+            } else {
+                m_transport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
+            }
 #else
-        if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
-            m_transport = std::make_shared<PosixUSBCDCTransport>(m_usbDebug);
-        } else {
-            m_transport = std::make_shared<LibUSBTransport>(m_usbDebug);
-        }
+            if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+                m_transport = std::make_shared<PosixUSBCDCTransport>(m_usbDebug);
+            } else {
+                m_transport = std::make_shared<LibUSBTransport>(m_usbDebug);
+            }
 #endif
+        }
 
         log(ASTRA_LOG_LEVEL_INFO) << "Using USB transport: "
             << (m_transportType == ASTRA_TRANSPORT_USB_CDC ? "cdc" : "usb") << endLog;
@@ -550,11 +584,15 @@ private:
 
         // When the primary is CDC, fastboot devices are bulk USB and need a separate libusb transport.
         if (fbVid != 0 && fbPid != 0 && m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+            if (transportFactory) {
+                m_fastbootTransport = transportFactory(ASTRA_TRANSPORT_USB, m_usbDebug);
+            } else {
 #if PLATFORM_WINDOWS
-            m_fastbootTransport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
+                m_fastbootTransport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
 #else
-            m_fastbootTransport = std::make_shared<LibUSBTransport>(m_usbDebug);
+                m_fastbootTransport = std::make_shared<LibUSBTransport>(m_usbDebug);
 #endif
+            }
             log(ASTRA_LOG_LEVEL_INFO) << "Creating secondary libusb transport for fastboot VID:0x"
                 << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << fbVid
                 << " PID:0x" << std::setw(4) << std::setfill('0') << fbPid << std::dec << endLog;
@@ -590,6 +628,15 @@ private:
         ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_START, os.str()}});
     }
 
+    static bool IsFailureStatus(AstraDeviceStatus status)
+    {
+        return status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
+            status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
+            status == ASTRA_DEVICE_STATUS_UPDATE_FAIL;
+    }
+
+    // Every response, from the manager or from a device, goes through here
+    // so that failures set the Shutdown() result and keep the logs.
     void ResponseCallback(AstraDeviceManagerResponse response)
     {
         // If a failure is reported then retain the temp directory containing logs
@@ -599,10 +646,7 @@ private:
                 m_failureReported = true;
             }
         } else if (response.IsDeviceResponse()) {
-            if (response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
-                response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
-                response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL)
-            {
+            if (IsFailureStatus(response.GetDeviceResponse().m_status)) {
                 m_removeTempOnClose = false;
                 m_failureReported = true;
             }
@@ -628,7 +672,25 @@ private:
                 return;
             }
 
-            astraDevice->SetStatusCallback(m_responseCallback);
+            // Route device statuses through ResponseCallback() so device-reported
+            // failures count, and remember whether this device reported one so
+            // the manager can report failures the device left silent without
+            // duplicating ones it did report. Device threads are joined and
+            // devices closed in Shutdown() before this object is destroyed.
+            auto deviceReportedFailure = std::make_shared<std::atomic<bool>>(false);
+            astraDevice->SetStatusCallback([this, deviceReportedFailure](AstraDeviceManagerResponse response) {
+                if (response.IsDeviceResponse() && IsFailureStatus(response.GetDeviceResponse().m_status)) {
+                    deviceReportedFailure->store(true);
+                }
+                ResponseCallback(std::move(response));
+            });
+            const auto reportFailureIfSilent = [this, &astraDevice, &deviceReportedFailure](
+                AstraDeviceStatus status, const std::string &message)
+            {
+                if (!deviceReportedFailure->load()) {
+                    ResponseCallback({DeviceResponse{astraDevice->GetDeviceName(), status, 0, "", message}});
+                }
+            };
 
             std::shared_ptr<FastbootArrival> arrival;
             if (expectsFastboot) {
@@ -654,9 +716,8 @@ private:
                     m_transport->UnblockDeviceEnumeration();
                     if (m_fastbootTransport) { m_fastbootTransport->UnblockDeviceEnumeration(); }
                 }
-                if (!openFailed) {
-                    ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
-                }
+                reportFailureIfSilent(openFailed ? ASTRA_DEVICE_STATUS_OPEN_FAIL : ASTRA_DEVICE_STATUS_BOOT_FAIL,
+                    openFailed ? "Failed to initialize device connection" : "Failed to Boot Device");
                 return;
             }
 
@@ -709,6 +770,7 @@ private:
                 ret = astraDevice->Update(m_flashImage);
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to update device" << endLog;
+                    reportFailureIfSilent(ASTRA_DEVICE_STATUS_UPDATE_FAIL, "Failed to update device");
                     m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
                     if (m_fastbootTransport) { m_fastbootTransport->RemoveActiveDevice(astraDevice->GetUSBPath()); }
                     if (enumerationBlocked) {
@@ -723,6 +785,11 @@ private:
             ret = astraDevice->WaitForCompletion();
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to wait for completion" << endLog;
+                const AstraDeviceStatus failedStatus = astraDevice->GetDeviceStatus();
+                reportFailureIfSilent(IsFailureStatus(failedStatus) ? failedStatus
+                    : (m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE ? ASTRA_DEVICE_STATUS_UPDATE_FAIL
+                        : ASTRA_DEVICE_STATUS_BOOT_FAIL),
+                    "Device did not complete");
                 // Remove from active set first (before Close() which may block),
                 // then close to release the libusb handle, then unblock enumeration
                 // so ProcessPendingDevices can accept a reconnect.
@@ -740,6 +807,12 @@ private:
             log(ASTRA_LOG_LEVEL_DEBUG) << "returned from WaitForCompletion" << endLog;
             AstraDeviceStatus status = astraDevice->GetDeviceStatus();
             log(ASTRA_LOG_LEVEL_DEBUG) << "Device status: " << AstraDevice::AstraDeviceStatusToString(status) << endLog;
+
+            // A device can end in a failed state without having reported it
+            // (e.g. SL16xx suppresses events for its 07_IMAGE size reply).
+            if (IsFailureStatus(status)) {
+                reportFailureIfSilent(status, "Device did not complete");
+            }
 
             // Determine whether this is a terminal-success state.  The SHUTDOWN
             // response is intentionally sent AFTER all cleanup below so that the

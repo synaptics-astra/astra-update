@@ -52,7 +52,7 @@ already-configured build tree.
 
 ## Behavior-to-test matrix
 
-There are 733 named cases across 19 executables, including 327 phase 3,
+There are 736 named cases across 20 executables, including 327 phase 3,
 59 phase 4, and 14 phase 5 SL16xx cases. Table-driven cases also make
 multiple assertions across supported enum combinations.
 
@@ -77,6 +77,7 @@ multiple assertions across supported enum combinations.
 | [usb-transport](usb_transport_test.cpp) | 5 | Handle-free completion observation through the shared Windows/POSIX open gate, VID/PID selectivity, port identity across devices/re-enumeration, and default/cleared observer behavior. No live USB device is opened. |
 | [astra-device-impl](astra_device_impl_test.cpp) | 23 | Generated/supplied uEnv and UUID reuse; boot/update list construction, Linux boot-only/update final-image choice, request name normalization and most-specific-name payload selection, status sequences, final-image and size-request completion gates, send/missing-image failures, suppressed events, keep-serving behavior, idle-timeout policy, prompt thread shutdown and idempotent close. |
 | [sl16xx-device](sl16xx_device_test.cpp) | 14 | Public boot/close lifecycle; update completion on idle when reset is disabled and on disconnect when it is enabled (UART console and uEnv); SL16xx interrupt request decoding, padding/truncated packet handling, ordered back-to-back image requests, binary console reads/writes, image size header and payload, `07_IMAGE` size handshake/status suppression, missing-image failure, no-device/cancel/error disconnects, miniloader reconnect handling, and concurrent-close/completion-wait wakeup. |
+| [astra-device-manager](astra_device_manager_test.cpp) | 3 | Boot-mode manager driven end to end through a fake transport (`SetUSBTransportFactoryForTesting`) and a scripted SL16xx device: success sends SHUTDOWN, `Shutdown()` returns false and the temp directory is removed; a device-reported BOOT_FAIL and a failure the device leaves unreported each produce exactly one failure response, make `Shutdown()` return true and keep the log. |
 
 Fixtures own unique temporary directories and restore permissions, log stores,
 streams and workers on failure. Waiters are explicitly woken and joined;
