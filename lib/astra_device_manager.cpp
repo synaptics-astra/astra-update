@@ -68,6 +68,23 @@ std::string FlashCompletionCommand(AstraDeviceSeries series, bool fastbootReboot
     return AstraDevice::GetFlashCompletionCommand(series, fastbootReboot);
 }
 
+std::shared_ptr<FastbootArrival> ClaimFastbootArrival(
+    std::deque<std::shared_ptr<FastbootArrival>> &pending, const std::string &usbPath)
+{
+    if (pending.empty()) {
+        return nullptr;
+    }
+    auto match = std::find_if(pending.begin(), pending.end(),
+        [&usbPath](const std::shared_ptr<FastbootArrival> &arrival) { return arrival->usbPath == usbPath; });
+    if (match == pending.end()) {
+        match = pending.begin();
+    }
+    std::shared_ptr<FastbootArrival> claimed = *match;
+    pending.erase(match);
+    claimed->arrived = true;
+    return claimed;
+}
+
 class AstraDeviceManager::AstraDeviceManagerImpl {
 public:
     AstraDeviceManagerImpl(std::function<void(AstraDeviceManagerResponse)> responseCallback,
@@ -332,10 +349,6 @@ private:
     uint16_t m_fastbootVid = 0;
     uint16_t m_fastbootPid = 0;
 
-    struct FastbootArrival {
-        std::chrono::steady_clock::time_point deadline;
-        bool arrived = false;
-    };
     std::mutex m_fastbootArrivalMutex;
     std::condition_variable m_fastbootArrivalCV;
     std::deque<std::shared_ptr<FastbootArrival>> m_pendingFastbootArrivals;
@@ -703,6 +716,7 @@ private:
             if (expectsFastboot) {
                 arrival = std::make_shared<FastbootArrival>();
                 arrival->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+                arrival->usbPath = astraDevice->GetUSBPath();
                 std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
                 m_pendingFastbootArrivals.push_back(arrival);
             }
@@ -749,7 +763,8 @@ private:
                     const bool timedOut = !ready && !m_shuttingDown.load();
                     lock.unlock();
                     if (timedOut) {
-                        const std::string message = "Timed out waiting for fastboot enumeration after 120 seconds";
+                        const std::string message = "Timed out waiting for fastboot enumeration after 120 seconds"
+                            " (device on USB path " + arrival->usbPath + ")";
                         log(ASTRA_LOG_LEVEL_ERROR) << message << endLog;
                         if (!m_runContinuously) {
                             m_completed.store(true);
@@ -943,10 +958,11 @@ private:
         const bool isFastboot = m_fastbootVid != 0 && m_fastbootPid != 0 &&
             device->GetVendorId() == m_fastbootVid && device->GetProductId() == m_fastbootPid;
         if (isFastboot) {
+            const std::string &arrivalPath = device->GetUSBPath();
             std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
-            if (!m_pendingFastbootArrivals.empty()) {
-                m_pendingFastbootArrivals.front()->arrived = true;
-                m_pendingFastbootArrivals.pop_front();
+            if (auto claimed = ClaimFastbootArrival(m_pendingFastbootArrivals, arrivalPath)) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Fastboot device on " << arrivalPath
+                    << " satisfies the device waiting on " << claimed->usbPath << endLog;
                 m_fastbootArrivalCV.notify_all();
             }
         }

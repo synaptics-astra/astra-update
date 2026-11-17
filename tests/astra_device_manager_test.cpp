@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <mutex>
 #include <thread>
@@ -248,6 +249,46 @@ int main(int argc, char **argv)
         REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL26XX, false, false).empty());
         // Reset disabled still re-enters fastboot so the write can be confirmed.
         REQUIRE(FlashCompletionCommand(ASTRA_SERIES_SL26XX, true, false) == fastboot);
+    });
+    // Several SL26xx boards updating at once each wait for their own board's
+    // fastboot re-enumeration. An arrival is matched by USB path, so a board
+    // that arrives out of order does not satisfy (and hide) another board's
+    // wait.
+    suite.Add("fastboot-arrival-claims-the-entry-on-the-same-usb-path", [] {
+        auto a = std::make_shared<FastbootArrival>();
+        a->usbPath = "1-1";
+        auto b = std::make_shared<FastbootArrival>();
+        b->usbPath = "1-2";
+        std::deque<std::shared_ptr<FastbootArrival>> pending{a, b};
+
+        REQUIRE(ClaimFastbootArrival(pending, "1-2") == b);
+        REQUIRE(b->arrived);
+        REQUIRE(!a->arrived);
+        REQUIRE(pending.size() == 1);
+        REQUIRE(pending.front() == a);
+
+        REQUIRE(ClaimFastbootArrival(pending, "1-1") == a);
+        REQUIRE(a->arrived);
+        REQUIRE(pending.empty());
+    });
+    suite.Add("fastboot-arrival-without-a-path-match-claims-the-oldest-entry", [] {
+        // A CDC primary transport reports a tty path that never equals the
+        // libusb fastboot path; keep the previous first-come behaviour.
+        auto a = std::make_shared<FastbootArrival>();
+        a->usbPath = "/dev/cu.usbmodem1101";
+        auto b = std::make_shared<FastbootArrival>();
+        b->usbPath = "/dev/cu.usbmodem1201";
+        std::deque<std::shared_ptr<FastbootArrival>> pending{a, b};
+
+        REQUIRE(ClaimFastbootArrival(pending, "1-2") == a);
+        REQUIRE(a->arrived);
+        REQUIRE(!b->arrived);
+        REQUIRE(pending.size() == 1);
+        REQUIRE(pending.front() == b);
+    });
+    suite.Add("fastboot-arrival-with-nothing-pending-claims-nothing", [] {
+        std::deque<std::shared_ptr<FastbootArrival>> pending;
+        REQUIRE(ClaimFastbootArrival(pending, "1-1") == nullptr);
     });
     return suite.Run(argc, argv);
 }
