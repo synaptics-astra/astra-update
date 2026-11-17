@@ -241,6 +241,13 @@ Then restart udev:
     sudo udevadm trigger
 ```
 
+## Python Bindings
+
+The Python package and CLI are documented in
+[PYTHON_BINDINGS.md](PYTHON_BINDINGS.md). Wheels can be built for Windows,
+Linux, and macOS; see [BUILDING_WHEELS.md](BUILDING_WHEELS.md) for the
+platform-specific build and repair steps. Python 3.11 or newer is supported.
+
 ## Build
 
 Astra Update uses ``cmake`` as the build system to support all three platforms.
@@ -258,7 +265,9 @@ Linux requires the libudev development package to be install. On Debian / Ubuntu
 Building on Windows requires a minimum version of Visual Studio 2019 (SDK v142). Astra Update is using the C++17 standard which may not be
 supported on older Platform Toolsets. 
 
-Building on Mac OS requires the MacOS SDK to be installed. This is included when installing Xcode. The default version is MacOSX15.2.sdk, but this can be modified by change the ``include_directories`` line in ``cmake/CMakeLists.macos.txt``.
+Building on Mac OS requires the MacOS SDK to be installed. This is included
+when installing Xcode. CMake resolves the active SDK; set
+``CMAKE_OSX_SYSROOT`` when you need to select a specific SDK.
 
 ### Download the Source
 

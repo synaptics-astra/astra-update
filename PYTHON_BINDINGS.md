@@ -17,7 +17,7 @@ The `python/` directory contains the Python package and CLI launcher for the ast
 ### Prerequisites
 
 You must have the following installed:
-- Python 3.8+ (with development headers)
+- Python 3.11+ (with development headers)
 - CMake 3.18+
 - C++ compiler (MSVC on Windows, GCC/Clang on Linux/macOS)
 - pip
@@ -56,10 +56,12 @@ for both the CMake build and pip:
 python -m pip install -e .
 ```
 
-The root `pyproject.toml` configures setuptools to install the package from
-`python/astra_update/` in editable mode. Build the native extension first using
-the steps above: `pip install -e .` installs the Python package and CLI entry
-point, but does not compile the C++ extension.
+The root `pyproject.toml` uses scikit-build-core to compile and install the
+native extension as part of this command. The direct CMake build steps above
+remain useful when building the extension for development and tests.
+
+Prebuilt wheel creation and platform-specific repair instructions are in
+[BUILDING_WHEELS.md](BUILDING_WHEELS.md).
 
 After installation, Python code can import `astra_update`, and the CLI is
 available as `astra-boot-py`. To run the script directly without installing:

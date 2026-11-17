@@ -1,23 +1,42 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "astra-update"
 version = "2.0.4"
 description = "Python bindings for the Astra Update library"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 
 [project.scripts]
 astra-boot-py = "astra_update.boot:main"
 
-[tool.setuptools]
-package-dir = { "" = "python" }
-include-package-data = true
+[tool.scikit-build]
+build-dir = "build/{wheel_tag}"
+cmake.version = ">=3.18"
+wheel.packages = []
 
-[tool.setuptools.packages.find]
-where = ["python"]
+[tool.scikit-build.cmake.define]
+ASTRA_BUILD_PYTHON_BINDINGS = "ON"
+ASTRA_BUILD_TESTS = "OFF"
+BUILD_TESTING = "OFF"
 
-[tool.setuptools.package-data]
-astra_update = ["*.pyd", "*.so", "*.dylib"]
+[tool.cibuildwheel]
+build = "cp311-* cp312-* cp313-* cp314-*"
+skip = "*-musllinux_*"
+test-command = "python -c \"import astra_update\""
+
+[tool.cibuildwheel.linux]
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+before-all = "dnf install -y systemd-devel"
+repair-wheel-command = "auditwheel repair --exclude libudev.so.1 -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
+before-build = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
