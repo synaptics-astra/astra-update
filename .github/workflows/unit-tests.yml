@@ -24,8 +24,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libudev-dev
       - name: Configure
         run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=${{ matrix.config }}
-      - name: Build unit tests
-        run: cmake --build build --config ${{ matrix.config }} --target unit-tests --parallel 2
+      - name: Build unit tests and CLIs
+        run: cmake --build build --config ${{ matrix.config }} --target unit-tests astra-update astra-boot --parallel 2
       - name: Run unit tests
         run: ctest --test-dir build -C ${{ matrix.config }} -L unit --output-on-failure
       - name: Configure without tests

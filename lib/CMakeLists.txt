@@ -11,7 +11,7 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(YAML_CPP_LIB_NAME "$<IF:$<CONFIG:Debug>,yaml-cppd,yaml-cpp>")
 else()
-    set(YAML_CPP_LIB_NAME "libyaml-cpp")
+    set(YAML_CPP_LIB_NAME "libyaml-cpp$<$<CONFIG:Debug>:d>")
 endif()
 
 ExternalProject_Add(libusb
