@@ -65,6 +65,20 @@ public:
               keepImageRequestLoopAfterBoot, leaveFastbootIdle)}
     {}
 
+    // Destroying the manager runs Shutdown(), which closes devices and joins
+    // their threads. Do that without the GIL, as shutdown() does, so other
+    // Python threads keep running meanwhile. The device threads only touch
+    // the C++ queue and never need the GIL. pybind11 destroys instances with
+    // the GIL held.
+    ~PyAstraDeviceManager()
+    {
+        py::gil_scoped_release release;
+        m_manager.reset();
+    }
+
+    PyAstraDeviceManager(const PyAstraDeviceManager&) = delete;
+    PyAstraDeviceManager& operator=(const PyAstraDeviceManager&) = delete;
+
     AstraDeviceManager& Manager() { return *m_manager; }
     ResponseQueue& Queue() { return *m_queue; }
     std::shared_ptr<ResponseQueue> SharedQueue() { return m_queue; }

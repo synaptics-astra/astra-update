@@ -143,3 +143,29 @@ class TestTypedFlashImageLoaders:
         with pytest.raises(ValueError, match="conflicts"):
             images.load_emmc_flash_image(str(image_file), {"image_type": "spi"})
         assert spy.calls == []
+
+
+class TestManagerDestructorReleasesGil:
+    def test_other_threads_run_while_a_manager_is_destroyed(self, tmp_path):
+        """Smoke test: destroying a manager (which runs Shutdown()) works with
+        another Python thread active, and returns."""
+        import threading
+        from astra_update import AstraDeviceManager
+
+        stop = threading.Event()
+        ticks = []
+
+        def spin():
+            while not stop.is_set():
+                ticks.append(1)
+                stop.wait(0.001)
+
+        worker = threading.Thread(target=spin)
+        worker.start()
+        try:
+            manager = AstraDeviceManager(temp_dir=str(tmp_path))
+            del manager
+        finally:
+            stop.set()
+            worker.join(timeout=5)
+        assert not worker.is_alive()
