@@ -207,20 +207,34 @@ while handler.has_responses() or mgr.response_queue_size() > 0:
 #### Waiting for Specific Status
 
 ```python
-from astra_update import DeviceStatus
+from astra_update import DeviceStatus, WaitAbortedError
 
 # Wait for device to complete boot
-success = handler.wait_for_status(
-    device_name="Device1",
-    target_status=DeviceStatus.BOOT_COMPLETE,
-    timeout=60.0  # seconds
-)
-
-if success:
-    print("Boot completed!")
+try:
+    success = handler.wait_for_status(
+        device_name="Device1",
+        target_status=DeviceStatus.BOOT_COMPLETE,
+        timeout=60.0  # seconds
+    )
+except WaitAbortedError as error:
+    # The device reported OPEN_FAIL, BOOT_FAIL or UPDATE_FAIL, or the manager
+    # reported FAILURE or SHUTDOWN, so BOOT_COMPLETE cannot arrive.
+    print(f"Boot failed: {error}")
 else:
-    print("Boot timeout!")
+    if success:
+        print("Boot completed!")
+    else:
+        print("Boot timeout!")
+
+# Events the wait passed over (progress, other devices) are still available,
+# in arrival order. Their callbacks already ran when they were received.
+for event in handler.drain_responses():
+    ...
 ```
+
+`wait_for_status()` does not stop for `IMAGE_SEND_FAIL`: after a boot a device
+can report it for one image and go on serving others. `wait_for_manager_shutdown()`
+waits only for `SHUTDOWN` and likewise keeps every other event.
 
 ## Python Bindings Reference
 
@@ -288,10 +302,19 @@ High-level response processing with event callbacks.
 - `get_next_response(timeout=None) -> Event | None` - Wait for next response
 - `register_callback(event_type, callback)` - Add event handler
 - `unregister_callback(event_type, callback)` - Remove event handler
-- `wait_for_status(device_name, status, timeout=None) -> bool` - Wait for device status
+- `wait_for_status(device_name, status, timeout=None) -> bool` - Wait for device status; `False` on timeout, raises `WaitAbortedError` if the device fails or the manager stops first
 - `wait_for_manager_shutdown(timeout=None) -> bool` - Wait for shutdown
 - `has_responses() -> bool` - Check for pending responses
 - `drain_responses() -> list[Event]` - Get and clear all responses
+
+Events passed over by the wait methods are kept and returned first by
+`get_next_response()`, `poll_responses()` and `drain_responses()`. Callbacks run
+once per event, when it is received. A handler is not thread safe.
+
+#### `WaitAbortedError`
+
+Raised by `ResponseHandler.wait_for_status()`; a `RuntimeError` whose `event`
+attribute is the failure or shutdown `Event` that ended the wait.
 
 ### Enums
 

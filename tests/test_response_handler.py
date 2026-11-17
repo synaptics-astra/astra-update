@@ -281,3 +281,197 @@ class TestImageLoaders:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class _ScriptedManager:
+    """
+    Stands in for AstraDeviceManager with a fixed list of responses.
+
+    Once the list is used up, get_response() raises instead of returning None
+    when ``fail_when_empty`` is set, so a wait that should have finished
+    fails the test rather than hanging it.
+    """
+
+    def __init__(self, responses, fail_when_empty=True):
+        self._responses = list(responses)
+        self._fail_when_empty = fail_when_empty
+
+    def get_response(self):
+        if self._responses:
+            return self._responses.pop(0)
+        if self._fail_when_empty:
+            raise AssertionError("waited past the last scripted response")
+        return None
+
+    def get_responses(self):
+        responses, self._responses = self._responses, []
+        return responses
+
+    def has_responses(self):
+        return bool(self._responses)
+
+
+def _device(device_name, status_name, message=""):
+    from astra_update import DeviceManagerResponse, DeviceResponse, DeviceStatus
+
+    response = DeviceResponse()
+    response.device_name = device_name
+    response.status = getattr(DeviceStatus, status_name)
+    response.progress = 0
+    response.image_name = ""
+    response.message = message
+    return DeviceManagerResponse(response)
+
+
+def _manager(status_name, message=""):
+    from astra_update import DeviceManagerResponse, ManagerResponse, DeviceManagerStatus
+
+    response = ManagerResponse()
+    response.manager_status = getattr(DeviceManagerStatus, status_name)
+    response.manager_message = message
+    return DeviceManagerResponse(response)
+
+
+def _describe(event):
+    if event.is_device_event():
+        response = event.get_device_response()
+        return (response.device_name, response.status.name)
+    return ("manager", event.get_manager_response().manager_status.name)
+
+
+class TestWaitForStatusEndsAndKeepsEvents:
+    """wait_for_status and wait_for_manager_shutdown stop on failures and keep other events."""
+
+    @pytest.mark.parametrize("failure", ["OPEN_FAIL", "BOOT_FAIL", "UPDATE_FAIL"])
+    def test_device_failure_ends_an_untimed_wait(self, failure):
+        from astra_update import DeviceStatus, WaitAbortedError
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([
+            _device("dev", "BOOT_START"),
+            _device("dev", failure, "it broke"),
+        ]), poll_interval=0.001)
+
+        with pytest.raises(WaitAbortedError) as raised:
+            handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE, timeout=None)
+
+        assert _describe(raised.value.event) == ("dev", failure)
+        assert "it broke" in str(raised.value)
+        assert [_describe(e) for e in handler.drain_responses()] == [("dev", "BOOT_START")]
+
+    @pytest.mark.parametrize("status", ["SHUTDOWN", "FAILURE"])
+    def test_manager_stop_ends_an_untimed_wait(self, status):
+        from astra_update import DeviceStatus, WaitAbortedError
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([_manager(status, "stopping")]),
+                                  poll_interval=0.001)
+
+        with pytest.raises(WaitAbortedError) as raised:
+            handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE)
+
+        assert _describe(raised.value.event) == ("manager", status)
+        assert "stopping" in str(raised.value)
+
+    def test_image_send_fail_does_not_end_the_wait(self):
+        from astra_update import DeviceStatus
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([
+            _device("dev", "IMAGE_SEND_FAIL"),
+            _device("dev", "BOOT_COMPLETE"),
+        ]), poll_interval=0.001)
+
+        assert handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE) is True
+        assert [_describe(e) for e in handler.drain_responses()] == [("dev", "IMAGE_SEND_FAIL")]
+
+    def test_waiting_for_a_failure_status_returns_true(self):
+        from astra_update import DeviceStatus
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([_device("dev", "BOOT_FAIL")]),
+                                  poll_interval=0.001)
+
+        assert handler.wait_for_status("dev", DeviceStatus.BOOT_FAIL) is True
+
+    def test_other_device_failure_is_kept_not_raised(self):
+        from astra_update import DeviceStatus
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([
+            _device("other", "BOOT_FAIL"),
+            _device("dev", "BOOT_PROGRESS"),
+            _device("dev", "BOOT_COMPLETE"),
+            _device("dev", "CLOSED"),
+        ]), poll_interval=0.001)
+
+        assert handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE) is True
+
+        # The passed-over events come back first and in order, then new ones.
+        assert handler.has_responses()
+        assert _describe(handler.get_next_response(timeout=0)) == ("other", "BOOT_FAIL")
+        assert [_describe(e) for e in handler.poll_responses()] == [
+            ("dev", "BOOT_PROGRESS"),
+            ("dev", "CLOSED"),
+        ]
+        assert not handler.has_responses()
+
+    def test_kept_failure_ends_a_later_wait_for_that_device(self):
+        from astra_update import DeviceStatus, WaitAbortedError
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([
+            _device("other", "BOOT_FAIL"),
+            _device("dev", "BOOT_COMPLETE"),
+        ]), poll_interval=0.001)
+        assert handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE) is True
+
+        with pytest.raises(WaitAbortedError) as raised:
+            handler.wait_for_status("other", DeviceStatus.BOOT_COMPLETE)
+        assert _describe(raised.value.event) == ("other", "BOOT_FAIL")
+        assert not handler.has_responses()
+
+    def test_wait_for_manager_shutdown_keeps_device_events(self):
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([
+            _manager("START"),
+            _device("dev", "UPDATE_FAIL"),
+            _manager("SHUTDOWN"),
+        ]), poll_interval=0.001)
+
+        assert handler.wait_for_manager_shutdown() is True
+        assert [_describe(e) for e in handler.drain_responses()] == [
+            ("manager", "START"),
+            ("dev", "UPDATE_FAIL"),
+        ]
+
+    def test_callbacks_run_once_for_events_returned_later(self):
+        from astra_update import DeviceStatus
+        from astra_update.response_handler import ResponseHandler, EventType
+
+        handler = ResponseHandler(_ScriptedManager([
+            _device("dev", "BOOT_START"),
+            _device("dev", "BOOT_COMPLETE"),
+        ]), poll_interval=0.001)
+        seen = []
+        handler.register_callback(EventType.DEVICE_EVENT, lambda e: seen.append(_describe(e)))
+
+        assert handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE) is True
+        assert seen == [("dev", "BOOT_START"), ("dev", "BOOT_COMPLETE")]
+
+        assert [_describe(e) for e in handler.drain_responses()] == [("dev", "BOOT_START")]
+        assert seen == [("dev", "BOOT_START"), ("dev", "BOOT_COMPLETE")]
+
+    def test_wait_for_status_times_out_with_nothing_arriving(self):
+        from astra_update import DeviceStatus
+        from astra_update.response_handler import ResponseHandler
+
+        handler = ResponseHandler(_ScriptedManager([_device("dev", "BOOT_START")],
+                                                   fail_when_empty=False),
+                                  poll_interval=0.001)
+
+        start = time.monotonic()
+        assert handler.wait_for_status("dev", DeviceStatus.BOOT_COMPLETE, timeout=0.05) is False
+        assert time.monotonic() - start >= 0.05
+        assert [_describe(e) for e in handler.drain_responses()] == [("dev", "BOOT_START")]
