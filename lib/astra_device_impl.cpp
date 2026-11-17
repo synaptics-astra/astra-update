@@ -258,11 +258,17 @@ void AstraDeviceImpl::RunImageRequestLoop()
         {
             std::lock_guard<std::mutex> lock(m_imageMutex);
 
-            auto it = std::find_if(m_images.begin(), m_images.end(),
-                [&imageNameCandidates](const Image &img) {
-                    return std::find(imageNameCandidates.begin(), imageNameCandidates.end(),
-                        img.GetName()) != imageNameCandidates.end();
-                });
+            // Candidates run from most to least specific; try each in turn so
+            // "sub/img.bin" is never answered with a top-level "img.bin"
+            // that happens to come first in m_images.
+            auto it = m_images.end();
+            for (const auto &candidate : imageNameCandidates) {
+                it = std::find_if(m_images.begin(), m_images.end(),
+                    [&candidate](const Image &img) { return img.GetName() == candidate; });
+                if (it != m_images.end()) {
+                    break;
+                }
+            }
 
             if (it == m_images.end()) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Requested image not found: " << requestedImageName << endLog;

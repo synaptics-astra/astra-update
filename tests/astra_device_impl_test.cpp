@@ -451,6 +451,33 @@ int main(int argc, char **argv)
         REQUIRE(statuses[1].m_progress == 100);
         REQUIRE(statuses[2].m_message == "Success");
     });
+    for (const bool nestedFirst : {false, true}) {
+        suite.Add(std::string("request-prefers-most-specific-image-name-")
+            + (nestedFirst ? "nested-first" : "top-level-first"), [=] {
+            test::TempDirectory directory;
+            const auto topLevel = directory.Write("img.bin", "top-level");
+            const auto nested = directory.Write("sub/img.bin", "nested");
+            RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
+            if (nestedFirst) {
+                probe.AddImage(nested, "sub/img.bin");
+                probe.AddImage(topLevel, "img.bin");
+            } else {
+                probe.AddImage(topLevel, "img.bin");
+                probe.AddImage(nested, "sub/img.bin");
+            }
+            probe.Queue({"sub/img.bin", 0});
+            probe.Queue({"img.bin", 0});
+            probe.Queue({"device-prefix/sub/img.bin", 0});
+            probe.Queue({"device-prefix\\img.bin", 0});
+            probe.Queue({"device-prefix/elsewhere/img.bin", 0});
+            REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_BOOT_START) == 0);
+            REQUIRE(probe.WaitForSentCount(5));
+            probe.Stop();
+            REQUIRE(probe.Payloads() == std::vector<std::string>({
+                "nested", "top-level", "nested", "top-level", "top-level"}));
+            probe.Close();
+        });
+    }
     suite.Add("update-final-image-and-idle-completion", [] {
         test::TempDirectory directory;
         const auto payload = directory.Write("final.img", "firmware");
