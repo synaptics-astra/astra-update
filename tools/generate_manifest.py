@@ -255,9 +255,12 @@ def main():
         nand_support = nand_support or "false"
         transport = transport or "usb_cdc"
 
-    if not chip or not secure_boot or not product_id or not console:
-        print("Required value is missing")
-        return
+    missing = [name for name, value in (
+        ('chip', chip), ('secure_boot', secure_boot), ('product_id', product_id),
+        ('console', console),
+    ) if not value]
+    if missing:
+        parser.error('Required boot manifest values are missing: ' + ', '.join(missing))
 
     yaml_content = f"""id: {unique_id}
 chip: {chip}
