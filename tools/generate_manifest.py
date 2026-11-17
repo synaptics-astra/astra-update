@@ -213,7 +213,9 @@ def main():
     if fastboot_reboot is None:
         fastboot_reboot = 'true' if supports_fastboot_reboot else 'false'
 
-    unique_id = str(uuid.uuid1())
+    # Random (version 4): uuid1 would embed this host's MAC address and the
+    # generation time in every published manifest.
+    unique_id = str(uuid.uuid4())
     uboot_version = args.uboot_version
     if not uboot_version and args.uboot_binary:
         uboot_version = extract_uboot_version(args.uboot_binary)
