@@ -251,6 +251,7 @@ AstraDeviceManager(
 - `get_responses() -> list[DeviceManagerResponse]` - Get all pending responses
 - `has_responses() -> bool` - Check if responses pending
 - `response_queue_size() -> int` - Get queue size
+- `get_response_queue() -> ResponseQueue` - This manager's own queue (`get()`, `is_empty()`, `size()`); it stays valid after the manager is destroyed
 - `get_version()` - Get library version (static)
 
 #### `FlashImage`
@@ -376,7 +377,7 @@ python -m pytest tests/test_integration.py -v      # Full integration tests
 ### Threading Model
 
 - **C++ Callbacks**: Called from AstraDeviceManager threads via pybind11
-- **Response Queue**: Thread-safe queue (std::mutex protected) bridges C++ and Python
+- **Response Queue**: Thread-safe queue (std::mutex protected) bridges C++ and Python; each `AstraDeviceManager` has its own, so responses never cross between managers
 - **Python Polling**: ResponseHandler polls queue with configurable interval (default: 10ms)
 - **No GIL Issues**: Callback puts into queue and returns immediately; Python polls non-blocking
 

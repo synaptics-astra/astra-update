@@ -15,14 +15,10 @@
 
 namespace py = pybind11;
 
-// Thread-safe response queue for bridging C++ callbacks to Python
+// Thread-safe response queue for bridging C++ callbacks to Python.
+// Each manager owns its own queue, so responses never leak between managers.
 class ResponseQueue {
 public:
-    static ResponseQueue& GetInstance() {
-        static ResponseQueue instance;
-        return instance;
-    }
-
     void Put(const AstraDeviceManagerResponse& response) {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push(response);
@@ -49,15 +45,34 @@ public:
     }
 
 private:
-    ResponseQueue() = default;
     std::queue<AstraDeviceManagerResponse> queue_;
     std::mutex mutex_;
 };
 
-// Callback that bridges C++ responses into the Python-accessible queue
-void ResponseQueueCallback(AstraDeviceManagerResponse response) {
-    ResponseQueue::GetInstance().Put(response);
-}
+// The Python-facing manager: an AstraDeviceManager plus the queue its
+// callback feeds. The queue is declared first so it outlives the manager,
+// whose destructor joins the device threads that write to it; the callback
+// also holds a reference of its own.
+class PyAstraDeviceManager {
+public:
+    PyAstraDeviceManager(bool continuous, AstraLogLevel logLevel, const std::string& logPath,
+        const std::string& tempDir, const std::string& filterPorts, bool usbDebug,
+        bool keepImageRequestLoopAfterBoot, bool leaveFastbootIdle)
+        : m_queue{std::make_shared<ResponseQueue>()},
+          m_manager{std::make_unique<AstraDeviceManager>(
+              [queue = m_queue](AstraDeviceManagerResponse response) { queue->Put(response); },
+              continuous, logLevel, logPath, tempDir, filterPorts, usbDebug,
+              keepImageRequestLoopAfterBoot, leaveFastbootIdle)}
+    {}
+
+    AstraDeviceManager& Manager() { return *m_manager; }
+    ResponseQueue& Queue() { return *m_queue; }
+    std::shared_ptr<ResponseQueue> SharedQueue() { return m_queue; }
+
+private:
+    std::shared_ptr<ResponseQueue> m_queue;
+    std::unique_ptr<AstraDeviceManager> m_manager;
+};
 
 PYBIND11_MODULE(_astra_update, m) {
     m.doc() = "Astra Update Library Python Bindings";
@@ -201,20 +216,22 @@ PYBIND11_MODULE(_astra_update, m) {
         .def_static("get_flash_completion_command", &AstraDevice::GetFlashCompletionCommand,
             py::arg("series"), py::arg("fastboot_reboot") = false);
 
+    // Per-manager response queue
+    py::class_<ResponseQueue, std::shared_ptr<ResponseQueue>>(m, "ResponseQueue")
+        .def("get", [](ResponseQueue& self) -> py::object {
+            AstraDeviceManagerResponse response = AstraDeviceManagerResponse(ManagerResponse());
+            if (self.Get(response)) {
+                return py::cast(response);
+            }
+            return py::none();
+        }, "Get a response from the queue (non-blocking), returns None if empty")
+        .def("is_empty", &ResponseQueue::IsEmpty)
+        .def("size", &ResponseQueue::Size);
+
     // AstraDeviceManager class
-    py::class_<AstraDeviceManager, std::shared_ptr<AstraDeviceManager>>(m, "AstraDeviceManager")
-        .def(py::init([](bool continuous,
-                         AstraLogLevel logLevel,
-                         const std::string& logPath,
-                         const std::string& tempDir,
-                         const std::string& filterPorts,
-                        bool usbDebug,
-                        bool keepImageRequestLoopAfterBoot,
-                        bool leaveFastbootIdle) {
-                return std::make_shared<AstraDeviceManager>(
-                    ResponseQueueCallback, continuous, logLevel, logPath, tempDir, filterPorts,
-                    usbDebug, keepImageRequestLoopAfterBoot, leaveFastbootIdle);
-             }),
+    py::class_<PyAstraDeviceManager, std::shared_ptr<PyAstraDeviceManager>>(m, "AstraDeviceManager")
+        .def(py::init<bool, AstraLogLevel, const std::string&, const std::string&,
+                const std::string&, bool, bool, bool>(),
             py::arg("continuous") = false,
             py::arg("log_level") = ASTRA_LOG_LEVEL_WARNING,
             py::arg("log_path") = "",
@@ -223,45 +240,53 @@ PYBIND11_MODULE(_astra_update, m) {
             py::arg("usb_debug") = false,
             py::arg("keep_image_request_loop_after_boot") = false,
             py::arg("leave_fastboot_idle") = false,
-            "Initialize AstraDeviceManager with automatic response queue callback")
-        .def("boot", &AstraDeviceManager::Boot,
+            "Initialize AstraDeviceManager; responses go to this manager's own queue")
+        .def("boot", [](PyAstraDeviceManager& self, std::string bootImagesPath,
+                std::string bootCommand, AstraDeviceBootStage bootStage) {
+                self.Manager().Boot(bootImagesPath, bootCommand, bootStage);
+            },
             py::arg("boot_images_path"),
             py::arg("boot_command") = "",
             py::arg("boot_stage") = ASTRA_DEVICE_BOOT_STAGE_AUTO,
             py::call_guard<py::gil_scoped_release>(),
             "Boot devices with the specified boot images")
-        .def("update", &AstraDeviceManager::Update,
+        .def("update", [](PyAstraDeviceManager& self, std::shared_ptr<FlashImage> flashImage,
+                std::string bootImagePath) {
+                self.Manager().Update(flashImage, bootImagePath);
+            },
             py::arg("flash_image"),
             py::arg("boot_image_path"),
             py::call_guard<py::gil_scoped_release>(),
             "Update devices with the specified flash image")
-        .def("shutdown", &AstraDeviceManager::Shutdown,
+        .def("shutdown", [](PyAstraDeviceManager& self) { return self.Manager().Shutdown(); },
             py::call_guard<py::gil_scoped_release>(),
             "Shutdown the device manager")
-        .def("get_log_file", &AstraDeviceManager::GetLogFile,
+        .def("get_log_file", [](PyAstraDeviceManager& self) { return self.Manager().GetLogFile(); },
             "Get the path to the log file")
         .def_static("get_version", &AstraDeviceManager::GetVersion,
             "Get the version of the device manager library")
-        .def("get_response", [](AstraDeviceManager& self) -> py::object {
+        .def("get_response_queue", &PyAstraDeviceManager::SharedQueue,
+            "Get this manager's response queue")
+        .def("get_response", [](PyAstraDeviceManager& self) -> py::object {
             AstraDeviceManagerResponse response = AstraDeviceManagerResponse(ManagerResponse());
-            if (ResponseQueue::GetInstance().Get(response)) {
+            if (self.Queue().Get(response)) {
                 return py::cast(response);
             }
             return py::none();
         }, "Get a response from the queue (non-blocking), returns None if empty")
-        .def("get_responses", [](AstraDeviceManager& self) -> py::list {
+        .def("get_responses", [](PyAstraDeviceManager& self) -> py::list {
             py::list responses;
             AstraDeviceManagerResponse response = AstraDeviceManagerResponse(ManagerResponse());
-            while (ResponseQueue::GetInstance().Get(response)) {
+            while (self.Queue().Get(response)) {
                 responses.append(response);
             }
             return responses;
         }, "Get all responses from the queue (non-blocking)")
-        .def("has_responses", [](AstraDeviceManager& self) -> bool {
-            return !ResponseQueue::GetInstance().IsEmpty();
+        .def("has_responses", [](PyAstraDeviceManager& self) -> bool {
+            return !self.Queue().IsEmpty();
         }, "Check if there are any responses in the queue")
-        .def("response_queue_size", [](AstraDeviceManager& self) -> size_t {
-            return ResponseQueue::GetInstance().Size();
+        .def("response_queue_size", [](PyAstraDeviceManager& self) -> size_t {
+            return self.Queue().Size();
         }, "Get the number of responses in the queue");
 
     // FlashImage static factory methods
@@ -323,17 +348,4 @@ PYBIND11_MODULE(_astra_update, m) {
         .def("get_final_boot_image", &AstraBootImage::GetFinalBootImage)
         .def("is_linux_boot", &AstraBootImage::IsLinuxBoot)
         .def("get_default_boot_stage", &AstraBootImage::GetDefaultBootStage);
-
-    // ResponseQueue access for Python
-    py::class_<ResponseQueue>(m, "ResponseQueue")
-        .def_static("get_instance", &ResponseQueue::GetInstance, py::return_value_policy::reference)
-        .def("get", [](ResponseQueue& self) -> py::object {
-            AstraDeviceManagerResponse response = AstraDeviceManagerResponse(ManagerResponse());
-            if (self.Get(response)) {
-                return py::cast(response);
-            }
-            return py::none();
-        }, "Get a response from the queue (non-blocking)")
-        .def("is_empty", &ResponseQueue::IsEmpty)
-        .def("size", &ResponseQueue::Size);
 }
