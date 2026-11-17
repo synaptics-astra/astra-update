@@ -67,10 +67,13 @@ void AstraDeviceImpl::BuildBootImageList(std::shared_ptr<AstraBootImage> bootIma
 // ---------------------------------------------------------------------------
 void AstraDeviceImpl::AppendUpdateImages(std::shared_ptr<FlashImage> flashImage)
 {
-    m_finalUpdateImage  = flashImage->GetFinalImage();
+    // Update() runs while the image-request loop is already serving boot
+    // images, so publish everything the loop reads under m_imageMutex (the
+    // loop holds it while matching a request against m_finalUpdateImage).
     m_resetWhenComplete = flashImage->GetResetWhenComplete();
 
     std::lock_guard<std::mutex> lock(m_imageMutex);
+    m_finalUpdateImage = flashImage->GetFinalImage();
     const std::vector<Image> &imgs = flashImage->GetImages();
     m_images.insert(m_images.end(), imgs.begin(), imgs.end());
 }

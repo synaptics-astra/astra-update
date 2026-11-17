@@ -230,7 +230,9 @@ protected:
     std::vector<Image> m_images;
     std::mutex m_imageMutex;
 
+    // Set before the image-request thread starts.
     std::string m_finalBootImage;
+    // Written by AppendUpdateImages() while the loop runs; guarded by m_imageMutex.
     std::string m_finalUpdateImage;
 
     // Set empty to disable size-request image logic (SL16XX sets "07_IMAGE").
@@ -250,7 +252,9 @@ protected:
     std::chrono::milliseconds m_imageRequestIdleTimeout{std::chrono::seconds(10)};
 
     bool m_uEnvSupport = false;
-    bool m_resetWhenComplete = false;
+    // Written by Update() while the image-request loop, the device thread and
+    // the manager's rebind path read it.
+    std::atomic<bool> m_resetWhenComplete{false};
 
     std::atomic<bool> m_running{false};
 
