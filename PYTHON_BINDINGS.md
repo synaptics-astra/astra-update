@@ -95,7 +95,7 @@ python python/astra-boot.py <boot-images-path> [options]
 - `-k, --keep-image-request-loop` - Keep serving image requests after boot completes
 - `--leave-fastboot-idle` - Leave an SL26XX device idle in fastboot
 - `-l, --log` - Log file path
-- `-M, --manifest` - Manifest file path
+- `-M, --manifest` - Ignored, with a warning; accepted so C++ `astra-boot` command lines still work. Boot images use the `manifest.yaml` in their own directory
 
 **Example:**
 ```bash

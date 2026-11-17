@@ -12,6 +12,82 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
 
+def _device_event(device_name, status_name, image_name="", message="", progress=0):
+    from astra_update import DeviceManagerResponse, DeviceResponse, DeviceStatus
+    from astra_update.response_handler import Event
+
+    response = DeviceResponse()
+    response.device_name = device_name
+    response.status = getattr(DeviceStatus, status_name)
+    response.progress = progress
+    response.image_name = image_name
+    response.message = message
+    return Event.from_response(DeviceManagerResponse(response))
+
+
+@pytest.fixture
+def boot_tool(tmp_path):
+    from astra_update.boot import AstraBootTool
+
+    tool = AstraBootTool(str(tmp_path), temp_dir=str(tmp_path / "work"))
+    yield tool
+    tool.device_manager.shutdown()
+
+
+class TestImageSendFail:
+    def test_image_send_fail_is_reported_and_closes_its_progress_bar(self, boot_tool, capsys):
+        from astra_update.boot import ProgressBar
+
+        bar = Mock()
+        other_bar = Mock()
+        boot_tool.progress_bars["dev:spk.bin"] = ProgressBar("dev", "spk.bin", bar)
+        boot_tool.progress_bars["dev:key.bin"] = ProgressBar("dev", "key.bin", other_bar)
+
+        boot_tool._handle_device_event(
+            _device_event("dev", "IMAGE_SEND_FAIL", "spk.bin", "Upload write failed"))
+
+        bar.close.assert_called_once_with()
+        other_bar.close.assert_not_called()
+        assert list(boot_tool.progress_bars) == ["dev:key.bin"]
+        err = capsys.readouterr().err
+        assert "spk.bin" in err and "dev" in err and "Upload write failed" in err
+        # Not fatal by itself: a fatal failure is followed by BOOT_FAIL.
+        assert boot_tool.running
+
+    def test_image_send_fail_without_a_progress_bar_is_still_reported(self, boot_tool, capsys):
+        boot_tool._handle_device_event(
+            _device_event("dev", "IMAGE_SEND_FAIL", "m52bl.bin", "Failed to open image"))
+
+        assert "Failed to open image" in capsys.readouterr().err
+        assert boot_tool.progress_bars == {}
+
+
+class TestManifestOption:
+    def test_manifest_is_accepted_but_warned_about(self, tmp_path, monkeypatch, capsys):
+        import astra_update.boot as boot
+
+        monkeypatch.setattr(boot.signal, "signal", lambda *args: None)
+        missing = tmp_path / "no-such-boot-images"
+        monkeypatch.setattr(sys, "argv", [
+            "astra-boot", str(missing), "-M", "manifest.yaml", "-T", str(tmp_path / "work")])
+
+        # The boot images path does not exist, so boot() stops before any USB work.
+        assert boot.main() == -1
+        err = capsys.readouterr().err
+        assert "--manifest is ignored" in err
+
+    def test_no_warning_without_manifest(self, tmp_path, monkeypatch, capsys):
+        import astra_update.boot as boot
+
+        monkeypatch.setattr(boot.signal, "signal", lambda *args: None)
+        missing = tmp_path / "no-such-boot-images"
+        monkeypatch.setattr(sys, "argv", [
+            "astra-boot", str(missing), "-T", str(tmp_path / "work")])
+
+        assert boot.main() == -1
+        assert "--manifest" not in capsys.readouterr().err
+
+
 class _FactorySpy:
     """Replaces FlashImage in astra_update.images and records factory calls."""
 

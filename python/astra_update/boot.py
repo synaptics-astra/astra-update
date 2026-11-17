@@ -219,6 +219,12 @@ class AstraBootTool:
                        DeviceStatus.IMAGE_SEND_PROGRESS,
                        DeviceStatus.IMAGE_SEND_COMPLETE):
             self._update_progress(device_name, image_name, progress, status)
+        elif status == DeviceStatus.IMAGE_SEND_FAIL:
+            # Not necessarily fatal: after a boot a device can fail one image
+            # and keep serving others. A fatal failure is followed by BOOT_FAIL.
+            self._close_progress_bar(device_name, image_name)
+            print(f"[ERROR] Sending {image_name} to {device_name} failed: {message}",
+                  file=sys.stderr)
 
     def _update_progress(self, device_name: str, image_name: str, 
                         progress: float, status: DeviceStatus):
@@ -262,6 +268,12 @@ class AstraBootTool:
         if status == DeviceStatus.IMAGE_SEND_COMPLETE:
             pbar_obj.tqdm_obj.close()
             del self.progress_bars[key]
+
+    def _close_progress_bar(self, device_name: str, image_name: str):
+        """Close and forget the progress bar for a device/image pair, if any."""
+        pbar_data = self.progress_bars.pop(f"{device_name}:{image_name}", None)
+        if pbar_data and pbar_data.tqdm_obj:
+            pbar_data.tqdm_obj.close()
 
     def _should_shutdown(self) -> bool:
         """Check if we should shutdown."""
@@ -312,10 +324,13 @@ def main():
         help="Temporary directory"
     )
     
+    # Accepted so command lines written for the C++ astra-boot still parse;
+    # boot images are described by the manifest.yaml in their own directory.
     parser.add_argument(
         "-M", "--manifest",
         default="",
-        help="Manifest file path"
+        help="Ignored; accepted for compatibility. Boot images use the "
+             "manifest.yaml in their own directory"
     )
     
     parser.add_argument(
@@ -383,6 +398,10 @@ def main():
 
     if args.boot_image is None:
         parser.error("the following arguments are required: boot_image")
+
+    if args.manifest:
+        print("[WARNING] --manifest is ignored by astra-boot; boot images use the "
+              "manifest.yaml in their own directory", file=sys.stderr)
     
     # Parse boot stage
     stage_map = {

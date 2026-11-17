@@ -6,8 +6,9 @@ The test suite for Python bindings is organized into:
 
 1. **Binding Tests** (`test_bindings.py`) - Verify C++ module integration
 2. **Response Handler Tests** (`test_response_handler.py`) - Verify event handling
-3. **Image Loader Tests** (in `test_response_handler.py`) - Verify image loading
-4. **Integration Tests** (planned) - End-to-end device operations
+3. **Image Loader Tests** (in `test_response_handler.py` and `test_boot_cli.py`) - Verify image loading and the typed SPI/eMMC loaders
+4. **Boot CLI Tests** (`test_boot_cli.py`) - `IMAGE_SEND_FAIL` reporting, the ignored `--manifest` option, manager teardown
+5. **Integration Tests** (planned) - End-to-end device operations
 
 ## Running Tests
 
@@ -32,6 +33,9 @@ python -m pytest tests/test_bindings.py -v
 
 # Test response handling
 python -m pytest tests/test_response_handler.py -v
+
+# Test the boot CLI and typed image loaders
+python -m pytest tests/test_boot_cli.py -v
 ```
 
 ### Run Specific Test Class
