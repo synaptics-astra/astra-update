@@ -448,6 +448,16 @@ class TestStaticMethods:
         except ImportError as e:
             pytest.skip(f"Bindings not available: {e}")
 
+    @pytest.mark.parametrize("value", [17, 31, 40])
+    def test_status_to_string_rejects_out_of_range_status(self, value):
+        """Out-of-range statuses must not read past the native name table."""
+        try:
+            from astra_update import AstraDevice, DeviceStatus
+        except ImportError as e:
+            pytest.skip(f"Bindings not available: {e}")
+
+        assert AstraDevice.status_to_string(DeviceStatus(value)) == "ASTRA_DEVICE_STATUS_UNKNOWN"
+
     def test_astra_device_series_to_string(self):
         """Test AstraDevice.series_to_string()."""
         try:
