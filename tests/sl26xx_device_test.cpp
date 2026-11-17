@@ -21,16 +21,22 @@ constexpr uint32_t kKeyResendSpkVersion = 0xA00C0307U;
 class BootRomUSB final : public test::ScriptedUSBDevice
 {
 public:
-    explicit BootRomUSB(uint32_t spkVersion, bool invalidVersionResponse = false)
-        : m_spkVersion(spkVersion), m_invalidVersionResponse(invalidVersionResponse)
+    // How the simulated BootROM answers the SPK version query (opcode 0x03).
+    enum class VersionReply { Valid, BadSync, None };
+
+    explicit BootRomUSB(uint32_t spkVersion, VersionReply versionReply = VersionReply::Valid)
+        : m_spkVersion(spkVersion), m_versionReply(versionReply)
     {
         SetOnWrite([this](const std::vector<uint8_t> &packet) {
             if (packet.size() < 4) {
                 return;
             }
+            if (packet[3] == 0x03 && m_versionReply == VersionReply::None) {
+                return;
+            }
 
             std::vector<uint8_t> response(8, 0);
-            response[0] = m_invalidVersionResponse && packet[3] == 0x03 ? 0 : 0x5B;
+            response[0] = m_versionReply == VersionReply::BadSync && packet[3] == 0x03 ? 0 : 0x5B;
             response[1] = 0x5A;
             if (packet[3] == 0x03) {
                 response[4] = static_cast<uint8_t>(m_spkVersion);
@@ -48,7 +54,7 @@ public:
 
 private:
     uint32_t m_spkVersion;
-    bool m_invalidVersionResponse;
+    VersionReply m_versionReply;
 };
 
 std::shared_ptr<AstraBootImage> MakeBootImage(const test::TempDirectory &directory)
@@ -72,11 +78,12 @@ std::vector<uint8_t> UploadOpcodes(const std::vector<std::vector<uint8_t>> &writ
     return opcodes;
 }
 
-void RequireBootROMUploadSequence(uint32_t spkVersion, std::vector<uint8_t> expectedOpcodes)
+void RequireBootROMUploadSequence(uint32_t spkVersion, std::vector<uint8_t> expectedOpcodes,
+    BootRomUSB::VersionReply versionReply = BootRomUSB::VersionReply::Valid)
 {
     test::TempDirectory directory;
     const auto image = MakeBootImage(directory);
-    auto usb = std::make_unique<BootRomUSB>(spkVersion);
+    auto usb = std::make_unique<BootRomUSB>(spkVersion, versionReply);
     auto *usbProbe = usb.get();
     auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
         true, "", false);
@@ -245,18 +252,15 @@ int main(int argc, char **argv)
     suite.Add("spk-at-key-resend-threshold-resends-key-before-m52bl", [] {
         RequireBootROMUploadSequence(kKeyResendSpkVersion, {0x01, 0x02, 0x03, 0x01, 0x04});
     });
-    suite.Add("invalid-spk-version-response-fails-before-m52bl", [] {
-        test::TempDirectory directory;
-        const auto image = MakeBootImage(directory);
-        auto usb = std::make_unique<BootRomUSB>(kKeyResendSpkVersion, true);
-        auto *usbProbe = usb.get();
-        auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
-            true, "", false);
-
-        REQUIRE(device->Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == -1);
-        REQUIRE(UploadOpcodes(usbProbe->Writes()) == std::vector<uint8_t>({0x01, 0x02, 0x03}));
-        REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_BOOT_FAIL);
-        device->Close();
+    // An SPK that does not answer the version query is treated as one older
+    // than the key-resend threshold: no key resend, and the boot continues.
+    suite.Add("invalid-spk-version-response-continues-without-key-resend", [] {
+        RequireBootROMUploadSequence(kKeyResendSpkVersion, {0x01, 0x02, 0x03, 0x04},
+            BootRomUSB::VersionReply::BadSync);
+    });
+    suite.Add("unanswered-spk-version-query-continues-without-key-resend", [] {
+        RequireBootROMUploadSequence(kKeyResendSpkVersion, {0x01, 0x02, 0x03, 0x04},
+            BootRomUSB::VersionReply::None);
     });
     return suite.Run(argc, argv);
 }

@@ -906,7 +906,10 @@ private:
         return ReadResponseCode(true, timeout);
     }
 
-    bool GetBootloaderVersion(uint32_t &version)
+    // Sends a BootROM-service version query and reads the version from the
+    // response header. Returns false if the request cannot be written or no
+    // valid response arrives; |what| names the queried component in logs.
+    bool QueryBootServiceVersion(uint8_t opcode, const char *what, uint32_t &version)
     {
         ASTRA_LOG;
 
@@ -917,7 +920,7 @@ private:
         packet.push_back(kHostSync1);
         packet.push_back(kHostSync2);
         packet.push_back(kServiceIdBoot);
-        packet.push_back(kOpcodeVersion);
+        packet.push_back(opcode);
         AppendU32LE(packet, 0);
         AppendU32LE(packet, 0);
         AppendU32LE(packet, 0);
@@ -929,22 +932,22 @@ private:
         ClearRxBuffer();
 
         if (!WriteAll(packet.data(), packet.size())) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX BL version request" << endLog;
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX " << what << " version request" << endLog;
             return false;
         }
 
         std::vector<uint8_t> responseHeader;
         if (!ReadExactBytes(kHostHeaderSize, responseHeader, std::chrono::seconds(2))) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX BL version response" << endLog;
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX " << what << " version response" << endLog;
             return false;
         }
 
         if (responseHeader[0] != kHostSync1 || responseHeader[1] != kHostSync2) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX BL version response" << endLog;
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX " << what << " version response" << endLog;
             return false;
         }
 
-        // BL VERSION typically encodes version in response header bytes [4..7].
+        // The version is encoded in response header bytes [4..7].
         version = ReadU32LE(&responseHeader[4]);
 
         // Some ROM variants append an extra 4-byte word after the response header.
@@ -954,52 +957,14 @@ private:
         return true;
     }
 
+    bool GetBootloaderVersion(uint32_t &version)
+    {
+        return QueryBootServiceVersion(kOpcodeVersion, "BL", version);
+    }
+
     bool GetSPKVersion(uint32_t &version)
     {
-        ASTRA_LOG;
-
-        version = 0;
-
-        std::vector<uint8_t> packet;
-        packet.reserve(kOpHeaderSize);
-        packet.push_back(kHostSync1);
-        packet.push_back(kHostSync2);
-        packet.push_back(kServiceIdBoot);
-        packet.push_back(kOpcodeSpkVersion);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-
-        ClearRxBuffer();
-
-        if (!WriteAll(packet.data(), packet.size())) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX BL version request" << endLog;
-            return false;
-        }
-
-        std::vector<uint8_t> responseHeader;
-        if (!ReadExactBytes(kHostHeaderSize, responseHeader, std::chrono::seconds(2))) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX BL version response" << endLog;
-            return false;
-        }
-
-        if (responseHeader[0] != kHostSync1 || responseHeader[1] != kHostSync2) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX BL version response" << endLog;
-            return false;
-        }
-
-        // BL VERSION typically encodes version in response header bytes [4..7].
-        version = ReadU32LE(&responseHeader[4]);
-
-        // Some ROM variants append an extra 4-byte word after the response header.
-        std::vector<uint8_t> trailing;
-        (void)ReadExactBytes(sizeof(uint32_t), trailing, std::chrono::milliseconds(50));
-
-        return true;
+        return QueryBootServiceVersion(kOpcodeSpkVersion, "SPK", version);
     }
 
     bool GetSysMgrVersion(uint32_t &version)
@@ -1163,16 +1128,20 @@ private:
             return false;
         }
 
+        // SPKs older than the key-resend threshold may not answer the version
+        // query. Treat no answer as an old SPK and skip the key resend; if the
+        // SPK is actually unresponsive, the M52BL upload below fails.
         uint32_t spkVersion = 0;
-        if (!GetSPKVersion(spkVersion)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to read SPK version" << endLog;
-            return false;
+        if (GetSPKVersion(spkVersion)) {
+            log(ASTRA_LOG_LEVEL_INFO) << "SL26XX SPK version: " << VersionToString(spkVersion)
+                                      << " (0x" << std::hex << std::uppercase << spkVersion
+                                      << std::dec << ")" << endLog;
+        } else {
+            spkVersion = 0;
+            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX SPK did not report its version; assuming it predates "
+                                         << VersionToString(kSpkVersionKeyResendThreshold)
+                                         << " and not resending the key image" << endLog;
         }
-
-
-        log(ASTRA_LOG_LEVEL_INFO) << "SL26XX SPK version: " << VersionToString(spkVersion)
-                                  << " (0x" << std::hex << std::uppercase << spkVersion
-                                  << std::dec << ")" << endLog;
 
         if (spkVersion >= kSpkVersionKeyResendThreshold) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX SPK version supports resending key image" << endLog;
