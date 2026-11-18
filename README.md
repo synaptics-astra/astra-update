@@ -1,35 +1,69 @@
 # Astra Update
 
-The Astra Update tool and library support communicating with Astra Machina devices over USB. The USB interface is
-primarily used for updating the internal storage (eMMC / SPI / NAND). Support for booting Linux using the USB interface is also supported. Astra Update can run on Windows, Linux, and Mac OS platforms.
+The Astra Update tool and library support communicating with Astra Machina
+devices over USB. The USB interface is primarily used for updating the internal
+storage (eMMC / SPI / NAND). Support for booting Linux using the USB interface
+is also supported. Astra Update can run on Windows, Linux, and Mac OS platforms.
 
-Pre-built versions of ``astra-update`` is located at https://github.com/synaptics-astra/usb-tool. In addition to pre-built binaries, this repo includes boot images and convenience scripts for running the tool.
+Pre-built versions of ``astra-update`` is located at
+https://github.com/synaptics-astra/usb-tool. In addition to pre-built binaries,
+this repo includes boot images and convenience scripts for running the tool.
 
 ## Overview
 
-Astra Machina devices support booting and internal storage updates over USB. To enter USB Boot Mode, hold the USB_BOOT button while pressing the reset button. Once in this mode, the host detects the device and establishes a connection. The device then sends image requests through a USB interrupt endpoint, and the host responds by transferring images via a USB bulk endpoint. This exchange continues until the boot or update process is complete.
+Astra Machina devices support booting and internal storage updates over USB. To
+enter USB Boot Mode, hold the USB_BOOT button while pressing the reset button.
+Once in this mode, the host detects the device and establishes a connection. The
+device then sends image requests through a USB interrupt endpoint, and the host
+responds by transferring images via a USB bulk endpoint. This exchange continues
+until the boot or update process is complete.
 
 ### Boot Images
 
-Boot images are specific to the Astra SoC and board. Astra Update imports a collection of boot images which it can then match with update image to determine which boot image should be used and which SoC to connect to. Each set of boot images contains a ``manifest.yaml`` file which describes the boot image. Each ``manifest.yaml`` file contains an ID which distinguishes it from the other boot images.
+Boot images are specific to the Astra SoC and board. Astra Update imports a
+collection of boot images which it can then match with update image to determine
+which boot image should be used and which SoC to connect to. Each set of boot
+images contains a ``manifest.yaml`` file which describes the boot image. Each
+``manifest.yaml`` file contains an ID which distinguishes it from the other boot
+images.
 
-Update images can also contain their own ``manifest.yaml`` file which specifies which boot image it requires. The boot image ID can also be set as a command line parameter. If an update image does not specify a boot image ID, then Astra Update can try to determine the correct boot image based on the characteristics of the update image. Manifest files are required for boot images, but are optional for update images.
+Update images can also contain their own ``manifest.yaml`` file which specifies
+which boot image it requires. The boot image ID can also be set as a command
+line parameter. If an update image does not specify a boot image ID, then Astra
+Update can try to determine the correct boot image based on the characteristics
+of the update image. Manifest files are required for boot images, but are
+optional for update images.
 
-Automatic selection requires matching the chip and secure boot version. The boot image's memory layout must be less than or equal to the update image's target memory layout: for example, a 512mb boot image can serve 512mb, 1gb, or 2gb targets, but a 2gb boot image cannot serve a 1gb target. All compatible memory sizes remain eligible, and the U-Boot/uEnv/console preferences decide first: Synaptics U-Boot with uEnv support, then any uEnv support, then a USB console. Among equally preferred images the largest memory layout wins, and any remaining tie goes to the first boot image directory in path order. Use ``--board any`` or ``board: any`` in an update image manifest to explicitly allow any board; a specific board name must match. An omitted or empty board remains unrestricted for backward compatibility. When a DDR type is specified, it must also match; omitting it leaves that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
+Automatic selection requires matching the chip and secure boot version. The boot
+image's memory layout must be less than or equal to the update image's target
+memory layout: for example, a 512mb boot image can serve 512mb, 1gb, or 2gb
+targets, but a 2gb boot image cannot serve a 1gb target. All compatible memory
+sizes remain eligible, and the U-Boot/uEnv/console preferences decide first:
+Synaptics U-Boot with uEnv support, then any uEnv support, then a USB console.
+Among equally preferred images the largest memory layout wins, and any
+remaining tie goes to the first boot image directory in path order. Use
+``--board any`` or ``board: any`` in an update image manifest to explicitly
+allow any board; a specific board name must match. An omitted or empty board
+remains unrestricted
+for backward compatibility. When a DDR type is specified, it must also match;
+omitting it leaves that constraint unrestricted. For SL261x variants above
+SL2610, matching images for the exact chip are preferred, with SL2610 images
+considered only if no exact-chip image satisfies all the constraints.
 
 Boot image manifests can optionally declare ``xspi_support: true`` or
 ``xspi_support: false``. For SPI updates, automatic selection excludes explicit
 ``false`` and prefers explicit ``true`` over manifests that omit the field.
 For other updates, it prefers ``false`` or omitted over ``true``, but still uses
-an XSPI-capable image if no other compatible image is available. These preferences
-apply before the existing U-Boot/uEnv/console preferences, within the best matching
-chip. NAND updates must still use a NAND-capable image.
+an XSPI-capable image if no other compatible image is available. These
+preferences apply before the existing U-Boot/uEnv/console preferences, within
+the best matching chip. NAND updates must still use a NAND-capable image.
 
 Omitting ``xspi_support`` preserves legacy compatibility: unmarked images remain
 usable for all update types. An explicit boot-image ID bypasses the preference,
 but SPI updates reject an image marked ``xspi_support: false``. Customers can
-keep otherwise matching eMMC and XSPI USB boot images in one collection by marking
-them ``false`` and ``true``, respectively, without specifying a boot-image ID.
+keep otherwise matching eMMC and XSPI USB boot images in one collection by
+marking them ``false`` and ``true``, respectively, without specifying a
+boot-image ID.
 
 When using [generate_manifest.py](tools/generate_manifest.py), pass
 ``--xspi_support true`` or ``--xspi_support false`` to emit this field.
@@ -64,11 +98,11 @@ per invocation. `--image_type boot` (the default) retains the USB boot manifest
 format. Use `spi`, `emmc`, or `nand` to generate an update manifest without USB
 boot-only fields.
 
-All modes reuse `--sdk_config` to derive chip, board, secure boot, memory layout,
-and DDR type. Explicit command-line values take precedence. Update manifests
-require chip, board, secure boot, and memory layout; DDR type is included when
-available. Pass `--memory_layout` explicitly if the target layout differs from
-the SDK's `CONFIG_PREBOOT_MEMORY_SIZE`.
+All modes reuse `--sdk_config` to derive chip, board, secure boot, memory
+layout, and DDR type. Explicit command-line values take precedence. Update
+manifests require chip, board, secure boot, and memory layout; DDR type is
+included when available. Pass `--memory_layout` explicitly if the target
+layout differs from the SDK's `CONFIG_PREBOOT_MEMORY_SIZE`.
 
 For example, invoke the generator from the image packaging step:
 
@@ -94,17 +128,28 @@ eMMC uses `emmc_part_list` in the update directory and does not accept
 to override it.
 
 Update manifests omit `boot_image` by default, allowing automatic boot-image
-selection. Supply `--boot_image ID` to pin one. `--reset enable|disable` defaults
-to `enable`. USB capability options such as `--xspi_support` and
-`--fastboot_reboot` describe boot images
-and are not emitted in update manifests. USB console configuration and the
-U-Boot binary are not required for update manifests.
+selection. Supply `--boot_image ID` to pin one. `--reset enable|disable`
+defaults to `enable`. USB capability options such as `--xspi_support` and
+`--fastboot_reboot` describe boot images and are not emitted in update
+manifests. USB console configuration and the U-Boot binary are not required
+for update manifests.
 
 ### The Temp Directory
 
-Astra Update creates a temp directory to store logs and supporting files which are used during the boot and update processes. By default, the temp directory will be created in the system default temp directory (``/tmp`` on Linux and Mac OS, ``C:\Users\<Username>\AppData\Local\Temp\`` on Windows). The temp directory contains the ``astradevicemanager.log`` file containing all logs for the execution of the process. The directory also contains device specific sub-directories which contains supporting data for each Astra device detected. The path of the temp directory can also be specified on the command line.
+Astra Update creates a temp directory to store logs and supporting files which
+are used during the boot and update processes. By default, the temp directory
+will be created in the system default temp directory (``/tmp`` on Linux and Mac
+OS, ``C:\Users\<Username>\AppData\Local\Temp\`` on Windows). The temp directory
+contains the ``astradevicemanager.log`` file containing all logs for the
+execution of the process. The directory also contains device specific
+sub-directories which contains supporting data for each Astra device detected.
+The path of the temp directory can also be specified on the command line.
 
-If the tool created the directory in the system default path, then it will delete it when the tool exits successfully. If the tool detects an error it will print the path of the directory and retain. The log file inside will contain additional information about the error. If the temp directory is specified on the command line then the tool will not automatically delete it.
+If the tool created the directory in the system default path, then it will
+delete it when the tool exits successfully. If the tool detects an error it
+will print the path of the directory and retain. The log file inside will
+contain additional information about the error. If the temp directory is
+specified on the command line then the tool will not automatically delete it.
 
 ## Library Update Events
 
@@ -134,21 +179,36 @@ confirmed. This can happen when the device is configured to boot from SPI and
 does not expose the Linux USB gadget; the update may have succeeded, but the
 tool cannot verify the resulting device state.
 
-Configure with `-DASTRA_BUILD_TESTS=ON`, build `astra-device-events-test`, and run
+Configure with `-DASTRA_BUILD_TESTS=ON`, build
+`astra-device-events-test`, and run
 `ctest --test-dir build -C Debug -R astra-device-events --output-on-failure` to
 check the shared event sequence without hardware.
 
 ## Usage
 
-The ``astra-update`` tool is a command line utility used for updating the internal storage on Astra Machina. This section discusses the modes and command line parameters which it supports.
+The ``astra-update`` tool is a command line utility used for updating the
+internal storage on Astra Machina. This section discusses the modes and
+command line parameters which it supports.
 
-``astra-update`` needs a directory of boot images and an update image which will be used to update the board. The default set of boot images can be downloaded from https://github.com/synaptics-astra/usb-tool/tree/main/astra-usbboot-images. Custom build boot images are also supported. The tool expects boot images to be stored in the astra-usbboot-image directory located in the directory where the tool is executed from.
+``astra-update`` needs a directory of boot images and an update image which will
+be used to update the board. The default set of boot images can be downloaded
+from
+https://github.com/synaptics-astra/usb-tool/tree/main/astra-usbboot-images.
+Custom build boot images are also supported. The tool expects boot images to be
+stored in the astra-usbboot-image directory located in the directory where the
+tool is executed from.
 
 ### Updating eMMC
 
-The eMMC update image is a directory which contains image and partition information along with sub images which are sent to the board for flashing. Typically the directory is named ``eMMCimg`` for prebuilt images or ``SYNAIMG`` when building a custom image. If the ``--flash`` command line parameter is not provided, ``astra-update`` will flash the ``eMMCimg`` or ``SYNAIMG`` image located in the current directory.
+The eMMC update image is a directory which contains image and partition
+information along with sub images which are sent to the board for flashing.
+Typically the directory is named ``eMMCimg`` for prebuilt images or ``SYNAIMG``
+when building a custom image. If the ``--flash`` command line parameter is not
+provided, ``astra-update`` will flash the ``eMMCimg`` or ``SYNAIMG`` image
+located in the current directory.
 
-Pre-built Astra SDK images can be found at https://github.com/synaptics-astra/sdk/releases
+Pre-built Astra SDK images can be found at
+https://github.com/synaptics-astra/sdk/releases
 
 Flash the ``eMMCimg`` or ``SYNAIMG`` image stored in the current directory.
 
@@ -169,14 +229,16 @@ To specify the path of the boot image collection and update image:
         astra-usbboot-images --flash /home/user/custom_sl1680_image
 ```
 
-If the update image does not contain a ``manifest.yaml`` file then the Boot Image ID can be specified on the command line:
+If the update image does not contain a ``manifest.yaml`` file then the Boot
+Image ID can be specified on the command line:
 
 ```bash
     astra-update --boot-image-id da48b402-04e9-11f0-a78d-00155d2dc74c \
         -f /home/user/Downloads/eMMCimg
 ```
 
-To have ``astra-update`` try to find the best boot image for a specific SoC and board:
+To have ``astra-update`` try to find the best boot image for a specific SoC and
+board:
 
 ```bash
     astra-update --chip sl1680 --board rdk --flash \
@@ -185,7 +247,11 @@ To have ``astra-update`` try to find the best boot image for a specific SoC and 
 
 ### Updating SPI
 
-SPI update images can be a single file (.bin) or a directory containing the image and a ``manifest.yaml`` file. If no ``manifest.yaml`` file is provided then the required information can be provided on the command line. The pre-built SPI images provide ``manifest.yaml`` files and can be found at https://github.com/synaptics-astra/spi-u-boot/releases
+SPI update images can be a single file (.bin) or a directory containing the
+image and a ``manifest.yaml`` file. If no ``manifest.yaml`` file is provided
+then the required information can be provided on the command line. The
+pre-built SPI images provide ``manifest.yaml`` files and can be found at
+https://github.com/synaptics-astra/spi-u-boot/releases
 
 To flash a SPI update image directory run:
 
@@ -201,40 +267,53 @@ To flash SPI images without a ``manifest.yaml``:
 
 ### Additional Options
 
-Astra Update also has additional command line parameters for providing details about images and debugging.
+Astra Update also has additional command line parameters for providing details
+about images and debugging.
 
 * -B, boot-image-collection - path to the directory containing boot images.
-* -l, --log arg - path to store the log file. Use ``stdout`` to log to the console.
+* -l, --log arg - path to store the log file. Use ``stdout`` to log to the
+    console.
 * -D, --debug - provides additional debug messages in the log file.
-* -C, --continuous - will wait continuously for devices to connect. The default behavior is to exit after the first device completes.
+* -C, --continuous - will wait continuously for devices to connect. The default
+    behavior is to exit after the first device completes.
 * -T, --temp-dir arg - specify the path of the temp directory.
 * -M, --manifest arg - specify the path to a ``manifest.yaml`` file.
 * -u, --usb-debug - enable libusb debugging and output it to the console.
-* -S, --simple-progress - print progress messages instead of using indicator progress bars. Better for logging.
-* -k, --keep-image-request-loop - keep astra-boot serving image requests after boot completes. The default behavior is to shut down after boot.
-* --leave-fastboot-idle - leave an SL26XX device idle in fastboot without serving image requests.
-* -p, port - Filter devices based on their port. USB devices from other ports will be ignored. Ports provided in a comma
-    separated string (ie, "1-2,3-9").
+* -S, --simple-progress - print progress messages instead of using indicator
+    progress bars. Better for logging.
+* -k, --keep-image-request-loop - keep astra-boot serving image requests after
+    boot completes. The default behavior is to shut down after boot.
+* --leave-fastboot-idle - leave an SL26XX device idle in fastboot without
+    serving image requests.
+* -p, port - Filter devices based on their port. USB devices from other ports
+    will be ignored. Ports provided in a comma separated string (ie, "1-2,3-9").
 
-These command line parameters describe the update image. If the image contains a ``manifest.yaml`` file then these parameters will override those in the file.
+These command line parameters describe the update image. If the image contains a
+``manifest.yaml`` file then these parameters will override those in the file.
 
 * -f, --flash arg - the path to the update image.
-* -b, --board arg - the board required for this update image; ``any`` explicitly allows any board.
+* -b, --board arg - the board required for this update image; ``any`` explicitly
+    allows any board.
 * -c, --chip arg - the SoC required for this update image.
 * -i, --boot-image-id arg - the boot image ID required for this update image.
 * -t, --image-type arg - the type of the update image (eMMC, SPI, NAND).
-* -s, --secure-boot arg - the version of secure boot required for this update image.
+* -s, --secure-boot arg - the version of secure boot required for this update
+    image.
 * -m, --memory-layout arg - the memory layout of the update image.
 * -d, --ddr-type arg - the ddr type of the update image.
 * -r, --disable-reset - Do not reset the device after a successful update.
 
 ### Running on Windows
 
-Astra Update requires a USB Kernel Driver to be installed on Windows. See https://synaptics-astra.github.io/doc/v/latest/linux/index.html#installing-the-winusb-driver-windows-only
+Astra Update requires a USB Kernel Driver to be installed on Windows. See
+https://synaptics-astra.github.io/doc/v/latest/linux/index.html#installing-the-winusb-driver-windows-only
 
 ### Running on Linux
 
-Astra Update provides a udev rules file which will set the permissions for the Astra Machina USB device to read / write for all. This allows non privileged processes to access Astra devices and allows ``astra-update`` to run without root permissions. Otherwise, ``astra-update`` should be run using ``sudo``.
+Astra Update provides a udev rules file which will set the permissions for the
+Astra Machina USB device to read / write for all. This allows non privileged
+processes to access Astra devices and allows ``astra-update`` to run without
+root permissions. Otherwise, ``astra-update`` should be run using ``sudo``.
 
 The file is located in the ``config`` directory and can be installed by running:
 
@@ -264,14 +343,16 @@ Astra Update uses ``cmake`` as the build system to support all three platforms.
 
 Building requires CMake version 3.10 or later.
 
-Linux requires the libudev development package to be install. On Debian / Ubuntu based system run the command.
+Linux requires the libudev development package to be install. On Debian / Ubuntu
+based system run the command.
 
 ```bash
     sudo apt install libudev-dev
 ```
 
-Building on Windows requires a minimum version of Visual Studio 2019 (SDK v142). Astra Update is using the C++17 standard which may not be
-supported on older Platform Toolsets. 
+Building on Windows requires a minimum version of Visual Studio 2019 (SDK v142).
+Astra Update is using the C++17 standard which may not be supported on older
+Platform Toolsets.
 
 Building on Mac OS requires the MacOS SDK to be installed. This is included
 when installing Xcode. CMake resolves the active SDK; set
@@ -285,7 +366,7 @@ when installing Xcode. CMake resolves the active SDK; set
 
 ### Building the Source
 
-Build the release version of tool and library using ``cmake``. 
+Build the release version of tool and library using ``cmake``.
 
 ```bash
     cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -301,7 +382,9 @@ Build a debug version using the debug build type.
 
 #### Building on Windows
 
-On Windows, the first ``cmake`` command will generate Visual Studio Project files. The generated project and solution files will be located in the ``build`` directory.
+On Windows, the first ``cmake`` command will generate Visual Studio Project
+files. The generated project and solution files will be located in the ``build``
+directory.
 
 Use the CMake Generator option to specify a specific version of Visual Studio.
 
@@ -309,11 +392,13 @@ Use the CMake Generator option to specify a specific version of Visual Studio.
     cmake -B build -DCMAKE_BUILD_TYPE=Release -G "Visual Studio 16 2019"
 ```
 
-Next, open the solution file in Visual Studio or use the ``cmake --build`` command to build using the command line.
+Next, open the solution file in Visual Studio or use the ``cmake --build``
+command to build using the command line.
 
 #### Building on Mac OS
 
-Building on Mac OS allows the architecture to be set on the command line. If this option is not set the native architecture will be used.
+Building on Mac OS allows the architecture to be set on the command line. If
+this option is not set the native architecture will be used.
 
 For x86_64 based Macs:
 
@@ -329,12 +414,14 @@ For Apple Silicon based Macs:
     cmake --build build_arm64 --config release
 ```
 
-> **Note:** The build system does not currently support building
-Universal Binaries for Mac OS.
+> **Note:** The build system does not currently support building Universal
+> Binaries for Mac OS.
 
 ### Running Tests
 
-CTest unit tests are enabled by default and can be disabled with ``-DBUILD_TESTING=OFF``. They use temporary fixtures and simulated USB devices; tests do not access USB hardware. To build and run all suites:
+CTest unit tests are enabled by default and can be disabled with
+``-DBUILD_TESTING=OFF``. They use temporary fixtures and simulated USB devices;
+tests do not access USB hardware. To build and run all suites:
 
 ```bash
     cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug
@@ -342,13 +429,21 @@ CTest unit tests are enabled by default and can be disabled with ``-DBUILD_TESTI
     ctest --test-dir build -C Debug -L unit --output-on-failure
 ```
 
-Use ``Release`` instead of ``Debug`` to validate optimized builds. Each test executable supports ``--list`` and an exact case name. The original ``boot-image-collection-test`` target and CTest name remain available. See [the test guide](tests/README.md) for the behavior matrix, coverage commands, platform limitations, and remaining test gaps.
+Use ``Release`` instead of ``Debug`` to validate optimized builds. Each test
+executable supports ``--list`` and an exact case name. The original
+``boot-image-collection-test`` target and CTest name remain available. See
+[the test guide](tests/README.md) for the behavior matrix, coverage commands,
+platform limitations, and remaining test gaps.
 
 ## Manifest Files
 
-The ``manifest.yaml`` files are used to describe boot and update images and help Astra Update determine which boot image to use for a specific update image. 
+The ``manifest.yaml`` files are used to describe boot and update images and help
+Astra Update determine which boot image to use for a specific update image.
 
-The boot image contains the unique id, SoC and board information, memory layout, u-boot information, and the device vendor and product ids which the tool will connect to. Boot images require a ``manifest.yaml`` to know which devices to connect to and what feature are enable in this instance of U-Boot.
+The boot image contains the unique id, SoC and board information, memory layout,
+u-boot information, and the device vendor and product ids which the tool will
+connect to. Boot images require a ``manifest.yaml`` to know which devices to
+connect to and what feature are enable in this instance of U-Boot.
 
 Example boot image ``manifest.yaml``:
 
@@ -391,7 +486,12 @@ Example SL2610 boot image ``manifest.yaml``:
     uboot_version: "U-Boot 2025.01.202605201605_202605202301-ga359a2e7e0dc (May 20 2026 - 02:59:50 +0000)"
 ```
 
-The ``manifest.yaml`` file provided with an eMMC image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The other fields provide additional information about the update image. If no ``manifest.yaml`` is provide with the update image, then the tool can determine which boot image to use based on the command line parameters or the characteristics of the update image.
+The ``manifest.yaml`` file provided with an eMMC image specifies which boot
+image is required to flash the image. The ``boot_image`` is the ID which the
+tool will use to select the boot image. The other fields provide additional
+information about the update image. If no ``manifest.yaml`` is provide with
+the update image, then the tool can determine which boot image to use based on
+the command line parameters or the characteristics of the update image.
 
 Example eMMCimg ``manifest.yaml``:
 
@@ -405,7 +505,13 @@ Example eMMCimg ``manifest.yaml``:
     reset: enable
 ```
 
-The ``manifest.yaml`` file provided with a SPI image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The ``image_file`` parameter identifies the name of the image file, since SPI images to not have a specific naming convention. The other fields provide additional information about the update image. If no ``manifest.yaml`` is provide with the update image, then the tool can determine which boot image to use based on the command line parameters.
+The ``manifest.yaml`` file provided with a SPI image specifies which boot image
+is required to flash the image. The ``boot_image`` is the ID which the tool will
+use to select the boot image. The ``image_file`` parameter identifies the name
+of the image file, since SPI images to not have a specific naming convention.
+The other fields provide additional information about the update image. If no
+``manifest.yaml`` is provide with the update image, then the tool can determine
+which boot image to use based on the command line parameters.
 
 Example SPI ``manifest.yaml``:
 
@@ -417,8 +523,10 @@ Example SPI ``manifest.yaml``:
     image_file: u-boot-astra-v1.1.1.sl1680.rdk.spi.bin
     reset: enable
 ```
-SPI ``manifest.yaml`` files also support listing multiple SPI images in maps. This is useful for flashing multiple SPI images at once. The ``images`` map contains
-a section per file. The section title is the file name and subsequent properties are the properties used for writing the file to the SPI flash.
+SPI ``manifest.yaml`` files also support listing multiple SPI images in maps.
+This is useful for flashing multiple SPI images at once. The ``images`` map
+contains a section per file. The section title is the file name and subsequent
+properties are the properties used for writing the file to the SPI flash.
 
 Example SPI ``manifest.yaml`` using image maps:
 
@@ -463,7 +571,12 @@ Example SPI ``manifest.yaml`` for Writing a Linux boot image:
             erase_second_length: 0xf1ffffff
 ```
 
-The ``manifest.yaml`` file provided with a NAND image specifies which boot image is required to flash the image. The ``boot_image`` is the ID which the tool will use to select the boot image. The ``read_address`` parameter is optional and defines the RAM address used by ``usbload`` and NAND write commands. If omitted, the tool uses ``0x10000000`` by default. The ``image_file`` parameter is optional; if omitted, the tool uses ``uNAND_full.img`` by default.
+The ``manifest.yaml`` file provided with a NAND image specifies which boot image
+is required to flash the image. The ``boot_image`` is the ID which the tool will
+use to select the boot image. The ``read_address`` parameter is optional and
+defines the RAM address used by ``usbload`` and NAND write commands. If omitted,
+the tool uses ``0x10000000`` by default. The ``image_file`` parameter is
+optional; if omitted, the tool uses ``uNAND_full.img`` by default.
 
 Example NAND ``manifest.yaml``:
 
