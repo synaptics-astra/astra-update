@@ -5,6 +5,7 @@
 
 import argparse
 from pathlib import Path
+from platform import machine
 import shutil
 import subprocess
 import sys
@@ -23,10 +24,12 @@ def run(*args: str | Path) -> None:
     subprocess.run(args, cwd=ROOT, check=True)
 
 
-def build_cli(build_dir: Path, stage: Path) -> str:
+def build_cli(build_dir: Path, stage: Path, macos_arch: str | None = None) -> str:
+    arch_args = [f"-DCMAKE_OSX_ARCHITECTURES={macos_arch}"] if macos_arch else []
     run(
         "cmake", "-S", ROOT, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release",
         "-DBUILD_TESTING=OFF", "-DASTRA_BUILD_TESTS=OFF", "-DASTRA_BUILD_PYTHON_BINDINGS=OFF",
+        *arch_args,
     )
     run("cmake", "--build", build_dir, "--config", "Release", "--target", *CLI_TARGETS)
     run("cmake", "--install", build_dir, "--config", "Release",
@@ -49,21 +52,27 @@ def package_release(output_dir: Path, platform: str) -> list[Path]:
 
     with tempfile.TemporaryDirectory(prefix="astra-release-") as tmp:
         work = Path(tmp)
-        stage = work / "bin"
         wheelhouse = work / "wheels"
         archives = work / "archives"
         archives.mkdir()
-        arch = build_cli(work / "build", stage)
-        for target in CLI_TARGETS:
-            name = f"{target}-{version}-{platform}-{arch}"
-            if platform == "windows":
-                zip_file(stage / f"{target}.exe", archives / f"{name}.zip")
-            else:
-                with tarfile.open(archives / f"{name}.tar.gz", "w:gz") as archive:
-                    archive.add(stage / target, arcname=target)
+        macos_archs = (
+            ("x86_64", "arm64") if platform == "macos" and machine() == "arm64" else ()
+        )
+        for macos_arch in macos_archs or (None,):
+            suffix = f"_{macos_arch}" if macos_arch else ""
+            stage = work / f"bin{suffix}"
+            arch = build_cli(work / f"build{suffix}", stage, macos_arch)
+            for target in CLI_TARGETS:
+                name = f"{target}-{version}-{platform}-{arch}"
+                if platform == "windows":
+                    zip_file(stage / f"{target}.exe", archives / f"{name}.zip")
+                else:
+                    with tarfile.open(archives / f"{name}.tar.gz", "w:gz") as archive:
+                        archive.add(stage / target, arcname=target)
 
+        wheel_arch_args = ["--archs", ",".join(macos_archs)] if macos_archs else []
         run("pipx", "run", "--spec", "cibuildwheel>=4,<5", "cibuildwheel",
-            "--platform", platform, "--output-dir", wheelhouse)
+            "--platform", platform, *wheel_arch_args, "--output-dir", wheelhouse)
         wheels = sorted(wheelhouse.glob("*.whl"))
         if not wheels:
             raise RuntimeError("cibuildwheel produced no wheels; check the build selection.")

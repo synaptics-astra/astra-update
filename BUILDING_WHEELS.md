@@ -27,9 +27,14 @@ directory contains:
   root. Extract the wheel before installing it with `pip`.
 
 The destination must be new or empty. Use `--output-dir <directory>` to
-choose a different destination, for example when packaging a second macOS
-architecture. For the default matrix, run on both Apple Silicon and Intel
-macOS to collect both sets of macOS assets.
+choose a different destination.
+
+On Apple Silicon, run with native `arm64` Python to build both `x86_64`
+and `arm64` CLI binaries and wheels in one run. The script uses separate
+temporary `build_x86_64` and `build_arm64` CMake directories for the CLIs
+and requests both architectures from cibuildwheel. The wheels are separate
+architecture-specific files, not universal2 wheels. On an Intel Mac, the
+script builds only `x86_64` by default.
 
 Upload the archives from each run to the same GitHub Release. The script does
 not require GitHub credentials or upload anything.
