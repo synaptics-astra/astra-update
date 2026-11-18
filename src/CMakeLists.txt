@@ -38,3 +38,14 @@ include_directories(${CMAKE_BINARY_DIR}/indicators/include)
 
 target_link_libraries(astra-update astraupdate)
 target_link_libraries(astra-boot astraupdate)
+
+install(TARGETS astra-update astra-boot
+    RUNTIME DESTINATION . COMPONENT release-cli EXCLUDE_FROM_ALL)
+
+set(release_cli_arch "${CMAKE_SYSTEM_PROCESSOR}")
+if(APPLE AND CMAKE_OSX_ARCHITECTURES)
+    set(release_cli_arch "${CMAKE_OSX_ARCHITECTURES}")
+elseif(WIN32 AND CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
+    set(release_cli_arch "${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
+endif()
+file(WRITE "${CMAKE_BINARY_DIR}/release-cli-arch.txt" "${release_cli_arch}\n")

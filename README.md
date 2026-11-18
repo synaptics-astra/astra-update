@@ -437,6 +437,13 @@ For Apple Silicon based Macs:
 > **Note:** The build system does not currently support building Universal
 > Binaries for Mac OS.
 
+### Packaging a GitHub Release
+
+Build both CLI executables and the platform's Python wheels locally, then
+upload the resulting archives to GitHub yourself. See
+[Local release packaging](BUILDING_WHEELS.md#local-release-packaging) for
+the command and prerequisites.
+
 ### Running Tests
 
 CTest unit tests are enabled by default and can be disabled with

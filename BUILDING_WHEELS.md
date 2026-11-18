@@ -1,4 +1,45 @@
-# Building astra-update wheels manually (Windows, macOS, Linux)
+# Building astra-update wheels locally (Windows, macOS, Linux)
+
+## Local release packaging
+
+Check out the same release revision on each target platform. With Python
+3.11 or newer, CMake 3.18 or newer, Git, and `pipx` on `PATH`, run from the
+repository root:
+
+```shell
+python tools/package_release.py
+```
+
+Use `py` in place of `python` on Windows if needed. Install the native C++
+toolchain for your platform and the [cibuildwheel prerequisites](#method-a-recommended-cibuildwheel-on-each-os)
+below. On Linux, install `libudev-dev` (or `systemd-devel`) on the host for
+the CLI build as well as running Docker for the wheel build.
+
+The script builds `astra-update` and `astra-boot` in Release mode and uses
+the `pyproject.toml` cibuildwheel matrix to build, repair, and (where
+supported) import-test the wheels. By default the resulting `release-assets/`
+directory contains:
+
+- One archive per CLI, for example `astra-boot-2.1.0-linux-x86_64.tar.gz`.
+  The name includes the version from `pyproject.toml`, OS, and target
+  architecture. Linux and macOS use `.tar.gz`; Windows uses `.zip`.
+- One `.whl.zip` per wheel, containing the original `.whl` at the archive
+  root. Extract the wheel before installing it with `pip`.
+
+The destination must be new or empty. Use `--output-dir <directory>` to
+choose a different destination.
+
+On Apple Silicon, run with native `arm64` Python to build both `x86_64`
+and `arm64` CLI binaries and wheels in one run. The script uses separate
+temporary `build_x86_64` and `build_arm64` CMake directories for the CLIs
+and requests both architectures from cibuildwheel. The wheels are separate
+architecture-specific files, not universal2 wheels. On an Intel Mac, the
+script builds only `x86_64` by default.
+
+Upload the archives from each run to the same GitHub Release. The script does
+not require GitHub credentials or upload anything.
+
+## Building wheels only
 
 Compiled wheels must be built on the OS they target. Run the steps below once on each OS and collect the resulting `.whl` files.
 
