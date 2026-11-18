@@ -1,6 +1,7 @@
 # CMake build directories
 /build/
 /build_*/
+/release-assets/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
