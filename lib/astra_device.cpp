@@ -124,8 +124,17 @@ const std::string AstraDevice::AstraDeviceStatusToString(AstraDeviceStatus statu
         "ASTRA_DEVICE_STATUS_OPEN_FAIL",
         "ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE",
     };
+    constexpr size_t statusCount = sizeof(statusStrings) / sizeof(statusStrings[0]);
+    static_assert(statusCount == ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE + 1,
+        "statusStrings must have one entry per AstraDeviceStatus value");
 
-    return statusStrings[status];
+    // The status can come from outside the library (e.g. an int converted
+    // by the Python binding), so never index past the table.
+    const auto index = static_cast<long long>(status);
+    if (index < 0 || index >= static_cast<long long>(statusCount)) {
+        return "ASTRA_DEVICE_STATUS_UNKNOWN";
+    }
+    return statusStrings[index];
 }
 
 const std::string AstraDevice::AstraDeviceSeriesToString(AstraDeviceSeries series)

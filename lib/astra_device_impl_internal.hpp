@@ -85,6 +85,18 @@ public:
      */
     virtual void NotifyFinalBootDetected() {}
 
+    // How long the image-request loop waits for the next request before
+    // treating the device as idle. Tests shorten it; call before Boot().
+    void SetImageRequestIdleTimeout(std::chrono::milliseconds timeout)
+    {
+        m_imageRequestIdleTimeout = timeout;
+    }
+
+    // How long an SL26xx update with fastboot_reboot waits for the device to
+    // re-enter fastboot after flashing. Other series ignore it. Tests shorten
+    // it; call before Update().
+    virtual void SetPostFlashFastbootTimeout(std::chrono::milliseconds /*timeout*/) {}
+
     virtual std::string GetDeviceName()
     {
         return m_deviceName;
@@ -223,7 +235,9 @@ protected:
     std::vector<Image> m_images;
     std::mutex m_imageMutex;
 
+    // Set before the image-request thread starts.
     std::string m_finalBootImage;
+    // Written by AppendUpdateImages() while the loop runs; guarded by m_imageMutex.
     std::string m_finalUpdateImage;
 
     // Set empty to disable size-request image logic (SL16XX sets "07_IMAGE").
@@ -236,10 +250,16 @@ protected:
     // an async disconnect event (e.g. SL26XX bulk-only fastboot). SL16XX
     // sets this false since it always gets a real USB disconnect event, so
     // completion should wait for that instead of guessing on an idle timeout.
+    // When the update does not reset the device there is no disconnect to
+    // wait for, so the idle timeout completes the update regardless.
     bool m_completeOnIdleTimeout = true;
 
+    std::chrono::milliseconds m_imageRequestIdleTimeout{std::chrono::seconds(10)};
+
     bool m_uEnvSupport = false;
-    bool m_resetWhenComplete = false;
+    // Written by Update() while the image-request loop, the device thread and
+    // the manager's rebind path read it.
+    std::atomic<bool> m_resetWhenComplete{false};
 
     std::atomic<bool> m_running{false};
 

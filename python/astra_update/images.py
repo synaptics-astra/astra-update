@@ -53,6 +53,22 @@ def load_flash_image(
         raise RuntimeError(f"Error loading flash image: {e}") from e
 
 
+def _load_typed_flash_image(
+    image_type: str,
+    image_path: str,
+    config: Optional[dict],
+    manifest: Optional[str],
+) -> FlashImage:
+    """Load a flash image with config["image_type"] set to image_type."""
+    cfg = dict(config or {})
+    requested = cfg.get("image_type")
+    if requested is not None and str(requested).lower() != image_type:
+        raise ValueError(
+            f"config image_type {requested!r} conflicts with load_{image_type}_flash_image()")
+    cfg["image_type"] = image_type
+    return load_flash_image(image_path, cfg, manifest)
+
+
 def load_spi_flash_image(
     image_path: str,
     config: Optional[dict] = None,
@@ -61,7 +77,8 @@ def load_spi_flash_image(
     """
     Load a SPI flash image from file.
 
-    Convenience wrapper for loading SPI flash images.
+    Same as load_flash_image() with config["image_type"] set to "spi", so the
+    image is loaded as SPI whatever its manifest or file layout suggests.
 
     Args:
         image_path: Path to the SPI flash image file
@@ -70,8 +87,12 @@ def load_spi_flash_image(
 
     Returns:
         FlashImage object for SPI flash
+
+    Raises:
+        ValueError: If config sets a different image_type
+        FileNotFoundError, RuntimeError: As for load_flash_image
     """
-    return load_flash_image(image_path, config, manifest)
+    return _load_typed_flash_image("spi", image_path, config, manifest)
 
 
 def load_emmc_flash_image(
@@ -82,17 +103,22 @@ def load_emmc_flash_image(
     """
     Load an eMMC flash image from file.
 
-    Convenience wrapper for loading eMMC flash images.
+    Same as load_flash_image() with config["image_type"] set to "emmc", so the
+    image is loaded as eMMC whatever its manifest or file layout suggests.
 
     Args:
-        image_path: Path to the eMMC flash image file
+        image_path: Path to the eMMC flash image directory
         config: Optional dict of config overrides (see load_flash_image)
         manifest: Path to the manifest file (optional)
 
     Returns:
         FlashImage object for eMMC flash
+
+    Raises:
+        ValueError: If config sets a different image_type
+        FileNotFoundError, RuntimeError: As for load_flash_image
     """
-    return load_flash_image(image_path, config, manifest)
+    return _load_typed_flash_image("emmc", image_path, config, manifest)
 
 
 __all__ = [

@@ -5,9 +5,9 @@ Provides a Pythonic interface to the C++ response queue with event typing
 and convenient status checking methods.
 """
 
+from collections import deque
 from enum import Enum
-from typing import Optional, Union, List
-import threading
+from typing import Callable, Optional, Union, List
 import time
 from dataclasses import dataclass
 
@@ -71,12 +71,57 @@ class Event:
         return None
 
 
+# Device statuses after which the device will not report anything further for
+# the current operation. These match the statuses the C++ manager counts as
+# failures. IMAGE_SEND_FAIL is not included: after a boot, a device can report
+# it for one image and keep serving the rest.
+_DEVICE_FAILURE_STATUSES = frozenset((
+    DeviceStatus.OPEN_FAIL,
+    DeviceStatus.BOOT_FAIL,
+    DeviceStatus.UPDATE_FAIL,
+))
+
+# Manager statuses after which no further device status can arrive.
+_MANAGER_STOP_STATUSES = frozenset((
+    DeviceManagerStatus.FAILURE,
+    DeviceManagerStatus.SHUTDOWN,
+))
+
+
+class WaitAbortedError(RuntimeError):
+    """
+    Raised by ResponseHandler.wait_for_status() when the awaited status can no
+    longer arrive: the device reported a failure, or the manager reported a
+    failure or shut down.
+
+    The event that ended the wait is available as ``event``.
+    """
+
+    def __init__(self, event: 'Event'):
+        self.event = event
+        if event.is_device_event():
+            response = event.get_device_response()
+            message = (f"Device {response.device_name} reported {response.status.name}"
+                       f": {response.message}")
+        else:
+            response = event.get_manager_response()
+            message = (f"Device manager reported {response.manager_status.name}"
+                       f": {response.manager_message}")
+        super().__init__(message)
+
+
 class ResponseHandler:
     """
     High-level handler for device manager responses.
     
     Provides methods to poll and consume responses from the device manager,
     with optional callbacks for different event types.
+
+    Callbacks run once for each response, when it is taken from the device
+    manager. The wait methods set aside the events they pass over, and
+    get_next_response(), poll_responses() and drain_responses() return those
+    events first, in the order they arrived, so waiting never loses an event.
+    A ResponseHandler is not thread safe; use it from one thread.
     """
 
     def __init__(self, device_manager, poll_interval: float = 0.01):
@@ -90,8 +135,9 @@ class ResponseHandler:
         self.device_manager = device_manager
         self.poll_interval = poll_interval
         self._callbacks = {}
-        self._running = False
-        self._thread = None
+        # Events taken from the device manager by a wait method but not
+        # matched by it, oldest first.
+        self._pending = deque()
 
     def register_callback(self, event_type: EventType, callback):
         """
@@ -119,14 +165,24 @@ class ResponseHandler:
             except Exception as e:
                 print(f"Error in callback: {e}")
 
+    def _receive(self) -> Optional[Event]:
+        """Take one response from the device manager and run its callbacks."""
+        response = self.device_manager.get_response()
+        if response is None:
+            return None
+        event = Event.from_response(response)
+        self._invoke_callbacks(event)
+        return event
+
     def poll_responses(self) -> List[Event]:
         """
         Poll for all available responses without blocking.
         
         Returns:
-            List of Event objects
+            List of Event objects, starting with any set aside by a wait method
         """
-        events = []
+        events = list(self._pending)
+        self._pending.clear()
         responses = self.device_manager.get_responses()
         for response in responses:
             event = Event.from_response(response)
@@ -144,20 +200,53 @@ class ResponseHandler:
         Returns:
             Event object or None if timeout
         """
-        start_time = time.time()
-        
+        if self._pending:
+            return self._pending.popleft()
+
+        deadline = None if timeout is None else time.monotonic() + timeout
         while True:
-            response = self.device_manager.get_response()
-            if response is not None:
-                event = Event.from_response(response)
-                self._invoke_callbacks(event)
+            event = self._receive()
+            if event is not None:
                 return event
-            
-            if timeout is not None:
-                elapsed = time.time() - start_time
-                if elapsed >= timeout:
-                    return None
-            
+            if deadline is not None and time.monotonic() >= deadline:
+                return None
+            time.sleep(self.poll_interval)
+
+    def _wait_for(
+        self,
+        matches: Callable[[Event], bool],
+        aborts: Callable[[Event], bool],
+        timeout: Optional[float],
+    ) -> bool:
+        """
+        Consume events in arrival order until one matches or aborts the wait.
+
+        The matching or aborting event is consumed; every other event is kept
+        for the caller. Returns True on a match and False on timeout, and
+        raises WaitAbortedError on an aborting event.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        # Events set aside by an earlier wait arrived first, so check them first.
+        for index, event in enumerate(self._pending):
+            if matches(event):
+                del self._pending[index]
+                return True
+            if aborts(event):
+                del self._pending[index]
+                raise WaitAbortedError(event)
+
+        while True:
+            event = self._receive()
+            if event is not None:
+                if matches(event):
+                    return True
+                if aborts(event):
+                    raise WaitAbortedError(event)
+                self._pending.append(event)
+                continue
+            if deadline is not None and time.monotonic() >= deadline:
+                return False
             time.sleep(self.poll_interval)
 
     def wait_for_status(
@@ -168,58 +257,64 @@ class ResponseHandler:
     ) -> bool:
         """
         Wait for a device to reach a specific status.
+
+        Events for other devices, and other events for this device, are kept
+        and returned later by get_next_response(), poll_responses() and
+        drain_responses().
         
         Args:
             device_name: Name of the target device
             target_status: The status to wait for
-            timeout: Maximum time to wait in seconds
+            timeout: Maximum time to wait in seconds (None = indefinite)
             
         Returns:
             True if status reached, False if timeout
+
+        Raises:
+            WaitAbortedError: if, before target_status, the device reports
+                OPEN_FAIL, BOOT_FAIL or UPDATE_FAIL, or the manager reports
+                FAILURE or SHUTDOWN. The error's ``event`` is that event.
         """
-        start_time = time.time()
-        
-        while True:
-            event = self.get_next_response(timeout=0.1 if timeout is None else min(0.1, timeout))
-            
-            if event and event.is_device_event():
-                dev_resp = event.get_device_response()
-                if dev_resp and dev_resp.device_name == device_name and dev_resp.status == target_status:
-                    return True
-            
-            if timeout is not None:
-                elapsed = time.time() - start_time
-                if elapsed >= timeout:
-                    return False
+        def device_response(event: Event) -> Optional[DeviceResponse]:
+            response = event.get_device_response()
+            if response is not None and response.device_name == device_name:
+                return response
+            return None
+
+        def matches(event: Event) -> bool:
+            response = device_response(event)
+            return response is not None and response.status == target_status
+
+        def aborts(event: Event) -> bool:
+            if event.is_manager_event():
+                return event.get_manager_response().manager_status in _MANAGER_STOP_STATUSES
+            response = device_response(event)
+            return response is not None and response.status in _DEVICE_FAILURE_STATUSES
+
+        return self._wait_for(matches, aborts, timeout)
 
     def wait_for_manager_shutdown(self, timeout: Optional[float] = None) -> bool:
         """
         Wait for the device manager to signal shutdown.
+
+        Device events and other manager events are kept and returned later by
+        get_next_response(), poll_responses() and drain_responses().
         
         Args:
-            timeout: Maximum time to wait in seconds
+            timeout: Maximum time to wait in seconds (None = indefinite)
             
         Returns:
             True if shutdown received, False if timeout
         """
-        start_time = time.time()
-        
-        while True:
-            event = self.get_next_response(timeout=0.1 if timeout is None else min(0.1, timeout))
-            
-            if event and event.is_manager_event():
-                mgr_resp = event.get_manager_response()
-                if mgr_resp and mgr_resp.manager_status == DeviceManagerStatus.SHUTDOWN:
-                    return True
-            
-            if timeout is not None:
-                elapsed = time.time() - start_time
-                if elapsed >= timeout:
-                    return False
+        def matches(event: Event) -> bool:
+            return (event.is_manager_event() and
+                    event.get_manager_response().manager_status == DeviceManagerStatus.SHUTDOWN)
+
+        return self._wait_for(matches, lambda event: False, timeout)
 
     def has_responses(self) -> bool:
-        """Check if there are any pending responses."""
-        return self.device_manager.has_responses()
+        """Check if there are any pending responses, including set-aside ones."""
+        return bool(self._pending) or self.device_manager.has_responses()
 
     def drain_responses(self) -> List[Event]:
         """

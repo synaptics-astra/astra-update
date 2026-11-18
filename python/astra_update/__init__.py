@@ -38,7 +38,7 @@ from ._astra_update import (
 __version__ = AstraDeviceManager.get_version()
 
 # Import Python-level utilities
-from .response_handler import ResponseHandler, EventType, Event
+from .response_handler import ResponseHandler, EventType, Event, WaitAbortedError
 
 __all__ = [
     # Classes
@@ -72,4 +72,5 @@ __all__ = [
     'ResponseHandler',
     'EventType',
     'Event',
+    'WaitAbortedError',
 ]

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import json
+import uuid
 from pathlib import Path
 
 
@@ -89,6 +90,45 @@ class GenerateManifestTests(unittest.TestCase):
             self.assertEqual(default_fields, explicit_fields)
             self.assertNotIn('image_type', explicit_fields)
             self.assertEqual(explicit_fields['fastboot_product_id'], '4EE0')
+
+    def test_boot_manifest_id_is_a_random_uuid(self):
+        # uuid1 would embed the host MAC address and a timestamp.
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'manifest.yaml'
+            command = [
+                sys.executable, str(GENERATOR), '--chip', 'sl2619',
+                '--board', 'coralboard', '--secure_boot', 'genx',
+                '--memory_layout', '2gb', '--output', str(output),
+            ]
+            ids = []
+            for _ in range(2):
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                fields = dict(line.split(': ', 1) for line in output.read_text().splitlines())
+                ids.append(uuid.UUID(fields['id']))
+            self.assertEqual([value.version for value in ids], [4, 4])
+            self.assertNotEqual(ids[0], ids[1])
+
+    def test_missing_boot_manifest_values_fail_without_writing(self):
+        # A build script must see the failure: non-zero exit, message on
+        # stderr naming what is missing, and no manifest written.
+        cases = (
+            (('--chip', 'sl2619', '--board', 'coralboard'), ['secure_boot']),
+            (('--chip', 'sl1680', '--secure_boot', 'genx'), ['console']),
+            (('--chip', 'sl9999', '--secure_boot', 'genx', '--console', 'uart'), ['product_id']),
+            (('--secure_boot', 'genx', '--console', 'uart', '--product_id', '00B1'), ['chip']),
+        )
+        for options, missing in cases:
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'manifest.yaml'
+                result = subprocess.run([
+                    sys.executable, str(GENERATOR), *options, '--output', str(output),
+                ], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Required boot manifest values are missing: ' + ', '.join(missing),
+                              result.stderr)
+                self.assertEqual(result.stdout, '')
+                self.assertFalse(output.exists())
 
     def test_optional_ddr_and_quoted_board(self):
         with tempfile.TemporaryDirectory() as directory:

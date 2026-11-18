@@ -32,8 +32,9 @@ public:
             keepImageRequestLoopAfterBoot, leaveFastbootIdle)
     {
         m_sizeRequestImageFilename = "07_IMAGE";
-        // SL16XX always gets a real USB disconnect event, so wait for that
-        // rather than the image-request loop's idle timeout.
+        // SL16XX gets a real USB disconnect event when the update resets the
+        // device, so wait for that rather than the image-request loop's idle
+        // timeout. Updates with reset disabled still complete on idle.
         m_completeOnIdleTimeout = false;
     }
 
@@ -535,9 +536,13 @@ private:
     // -----------------------------------------------------------------------
     // Virtual hook: WakeImageRequestThread
     // Notifies m_imageRequestCV so WaitForImageRequest returns immediately.
+    // The notify is made under m_imageRequestMutex: m_running is cleared
+    // without it, so a bare notify could fall between the waiter's predicate
+    // check and its wait and be lost until the idle timeout.
     // -----------------------------------------------------------------------
     void WakeImageRequestThread() override
     {
+        std::lock_guard<std::mutex> lock(m_imageRequestMutex);
         m_imageRequestCV.notify_all();
     }
 };

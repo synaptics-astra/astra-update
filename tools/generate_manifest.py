@@ -213,7 +213,9 @@ def main():
     if fastboot_reboot is None:
         fastboot_reboot = 'true' if supports_fastboot_reboot else 'false'
 
-    unique_id = str(uuid.uuid1())
+    # Random (version 4): uuid1 would embed this host's MAC address and the
+    # generation time in every published manifest.
+    unique_id = str(uuid.uuid4())
     uboot_version = args.uboot_version
     if not uboot_version and args.uboot_binary:
         uboot_version = extract_uboot_version(args.uboot_binary)
@@ -253,9 +255,12 @@ def main():
         nand_support = nand_support or "false"
         transport = transport or "usb_cdc"
 
-    if not chip or not secure_boot or not product_id or not console:
-        print("Required value is missing")
-        return
+    missing = [name for name, value in (
+        ('chip', chip), ('secure_boot', secure_boot), ('product_id', product_id),
+        ('console', console),
+    ) if not value]
+    if missing:
+        parser.error('Required boot manifest values are missing: ' + ', '.join(missing))
 
     yaml_content = f"""id: {unique_id}
 chip: {chip}

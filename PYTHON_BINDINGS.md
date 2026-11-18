@@ -95,7 +95,7 @@ python python/astra-boot.py <boot-images-path> [options]
 - `-k, --keep-image-request-loop` - Keep serving image requests after boot completes
 - `--leave-fastboot-idle` - Leave an SL26XX device idle in fastboot
 - `-l, --log` - Log file path
-- `-M, --manifest` - Manifest file path
+- `-M, --manifest` - Ignored, with a warning; accepted so C++ `astra-boot` command lines still work. Boot images use the `manifest.yaml` in their own directory
 
 **Example:**
 ```bash
@@ -155,7 +155,9 @@ mgr.update(flash_image, "/path/to/boot/images")
 ```
 
 `load_flash_image()` calls the native `Load()` method and raises `RuntimeError`
-with the library's load diagnostic on failure. When using
+with the library's load diagnostic on failure. `load_spi_flash_image()` and
+`load_emmc_flash_image()` are the same with `config["image_type"]` set to
+`"spi"` or `"emmc"`; they raise `ValueError` if `config` names a different type. When using
 `FlashImage.flash_image_factory()` directly, call `load()` before `mgr.update()`.
 Flash images expose metadata getters, `get_load_error()`, and U-Boot version
 selection through `UbootVersion` and `set_uboot_version()`.
@@ -207,20 +209,34 @@ while handler.has_responses() or mgr.response_queue_size() > 0:
 #### Waiting for Specific Status
 
 ```python
-from astra_update import DeviceStatus
+from astra_update import DeviceStatus, WaitAbortedError
 
 # Wait for device to complete boot
-success = handler.wait_for_status(
-    device_name="Device1",
-    target_status=DeviceStatus.BOOT_COMPLETE,
-    timeout=60.0  # seconds
-)
-
-if success:
-    print("Boot completed!")
+try:
+    success = handler.wait_for_status(
+        device_name="Device1",
+        target_status=DeviceStatus.BOOT_COMPLETE,
+        timeout=60.0  # seconds
+    )
+except WaitAbortedError as error:
+    # The device reported OPEN_FAIL, BOOT_FAIL or UPDATE_FAIL, or the manager
+    # reported FAILURE or SHUTDOWN, so BOOT_COMPLETE cannot arrive.
+    print(f"Boot failed: {error}")
 else:
-    print("Boot timeout!")
+    if success:
+        print("Boot completed!")
+    else:
+        print("Boot timeout!")
+
+# Events the wait passed over (progress, other devices) are still available,
+# in arrival order. Their callbacks already ran when they were received.
+for event in handler.drain_responses():
+    ...
 ```
+
+`wait_for_status()` does not stop for `IMAGE_SEND_FAIL`: after a boot a device
+can report it for one image and go on serving others. `wait_for_manager_shutdown()`
+waits only for `SHUTDOWN` and likewise keeps every other event.
 
 ## Python Bindings Reference
 
@@ -251,6 +267,7 @@ AstraDeviceManager(
 - `get_responses() -> list[DeviceManagerResponse]` - Get all pending responses
 - `has_responses() -> bool` - Check if responses pending
 - `response_queue_size() -> int` - Get queue size
+- `get_response_queue() -> ResponseQueue` - This manager's own queue (`get()`, `is_empty()`, `size()`); it stays valid after the manager is destroyed
 - `get_version()` - Get library version (static)
 
 #### `FlashImage`
@@ -287,10 +304,19 @@ High-level response processing with event callbacks.
 - `get_next_response(timeout=None) -> Event | None` - Wait for next response
 - `register_callback(event_type, callback)` - Add event handler
 - `unregister_callback(event_type, callback)` - Remove event handler
-- `wait_for_status(device_name, status, timeout=None) -> bool` - Wait for device status
+- `wait_for_status(device_name, status, timeout=None) -> bool` - Wait for device status; `False` on timeout, raises `WaitAbortedError` if the device fails or the manager stops first
 - `wait_for_manager_shutdown(timeout=None) -> bool` - Wait for shutdown
 - `has_responses() -> bool` - Check for pending responses
 - `drain_responses() -> list[Event]` - Get and clear all responses
+
+Events passed over by the wait methods are kept and returned first by
+`get_next_response()`, `poll_responses()` and `drain_responses()`. Callbacks run
+once per event, when it is received. A handler is not thread safe.
+
+#### `WaitAbortedError`
+
+Raised by `ResponseHandler.wait_for_status()`; a `RuntimeError` whose `event`
+attribute is the failure or shutdown `Event` that ended the wait.
 
 ### Enums
 
@@ -376,7 +402,7 @@ python -m pytest tests/test_integration.py -v      # Full integration tests
 ### Threading Model
 
 - **C++ Callbacks**: Called from AstraDeviceManager threads via pybind11
-- **Response Queue**: Thread-safe queue (std::mutex protected) bridges C++ and Python
+- **Response Queue**: Thread-safe queue (std::mutex protected) bridges C++ and Python; each `AstraDeviceManager` has its own, so responses never cross between managers
 - **Python Polling**: ResponseHandler polls queue with configurable interval (default: 10ms)
 - **No GIL Issues**: Callback puts into queue and returns immediately; Python polls non-blocking
 

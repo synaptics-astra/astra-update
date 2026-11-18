@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <future>
 #include <mutex>
+#include <thread>
 
 #include "astra_device_impl_internal.hpp"
 #include "boot_image_fixtures.hpp"
@@ -97,6 +98,66 @@ std::vector<uint8_t> SizeHeader(uint32_t size)
 void StartBoot(AstraDeviceImpl &device, const std::shared_ptr<AstraBootImage> &image)
 {
     REQUIRE(device.Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == 0);
+}
+
+class ResetFlashImage final : public FlashImage
+{
+public:
+    ResetFlashImage(const test::TempDirectory &directory, bool resetWhenComplete)
+        : FlashImage(FLASH_IMAGE_TYPE_EMMC, directory.Path().string(), "", "sl1680", "rdk",
+            ASTRA_SECURE_BOOT_V2, ASTRA_MEMORY_LAYOUT_4GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED,
+            ASTRA_UBOOT_VERSION_2025_01, resetWhenComplete, nullptr)
+    {
+        m_finalImage = "rootfs.subimg";
+        m_images.emplace_back(directory.Write("rootfs.subimg", "rootfs-payload").string(),
+            ASTRA_IMAGE_TYPE_UPDATE_EMMC);
+        m_flashCommand = "l2emmc eMMCimg";
+    }
+
+    int Load() override { return 0; }
+};
+
+// Boots, queues every image request at once (so the shortened idle timeout
+// cannot fire mid-boot), and waits until the update has been fully served.
+std::unique_ptr<AstraDeviceImpl> ServeWholeUpdate(const test::TempDirectory &bootDirectory,
+    const test::TempDirectory &updateDirectory, bool uEnvSupport, bool resetWhenComplete,
+    test::ScriptedUSBDevice *&usbProbe, StatusCollector &statuses)
+{
+    auto fields = test::BootManifest();
+    fields["chip"] = "sl1680";
+    fields["secure_boot"] = "gen2";
+    fields["uenv_support"] = uEnvSupport ? "true" : "false";
+    test::WriteBootManifest(bootDirectory, fields);
+    bootDirectory.Write("minildr.img", "miniloader");
+    auto bootImage = std::make_shared<AstraBootImage>(bootDirectory.Path().string());
+    REQUIRE(bootImage->Load());
+
+    auto usb = std::make_unique<test::ScriptedUSBDevice>();
+    usbProbe = usb.get();
+    auto device = CreateAstraDeviceSL16XXImpl(std::move(usb), bootDirectory.Path().string(),
+        false, "l2emmc eMMCimg", false);
+    device->SetImageRequestIdleTimeout(std::chrono::milliseconds(300));
+    statuses.Install(*device);
+    StartBoot(*device, bootImage);
+    REQUIRE(device->Update(std::make_shared<ResetFlashImage>(updateDirectory, resetWhenComplete)) == 0);
+
+    usbProbe->Emit(USBDevice::USB_DEVICE_EVENT_INTERRUPT, Request("minildr.img"));
+    usbProbe->Emit(USBDevice::USB_DEVICE_EVENT_INTERRUPT, Request("rootfs.subimg", 0x80));
+    usbProbe->Emit(USBDevice::USB_DEVICE_EVENT_INTERRUPT, Request("07_IMAGE"));
+    REQUIRE(statuses.WaitForImage("rootfs.subimg", ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE));
+    for (int i = 0; i < 100 && device->GetDeviceStatus() != ASTRA_DEVICE_STATUS_UPDATE_COMPLETE; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
+    return device;
+}
+
+bool ReportedSuccess(const StatusCollector &statuses)
+{
+    const auto responses = statuses.Responses();
+    return std::any_of(responses.begin(), responses.end(), [](const DeviceResponse &response) {
+        return response.m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE && response.m_message == "Success";
+    });
 }
 
 } // namespace
@@ -381,5 +442,48 @@ int main(int argc, char **argv)
         REQUIRE(usbProbe->CloseCount() == 1);
         REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_CLOSED);
     });
+    for (const bool uEnvSupport : {false, true}) {
+        const std::string console = uEnvSupport ? "uenv" : "uart";
+        suite.Add("update-without-reset-completes-on-idle-" + console, [=] {
+            test::TempDirectory bootDirectory;
+            test::TempDirectory updateDirectory;
+            test::ScriptedUSBDevice *usbProbe = nullptr;
+            StatusCollector statuses;
+            auto device = ServeWholeUpdate(bootDirectory, updateDirectory, uEnvSupport, false,
+                usbProbe, statuses);
+
+            // No reset means no USB disconnect: the idle timeout must finish the update.
+            auto completion = std::async(std::launch::async, [&] { return device->WaitForCompletion(); });
+            const bool returned = completion.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            if (!returned) {
+                usbProbe->Emit(USBDevice::USB_DEVICE_EVENT_NO_DEVICE);
+                completion.wait();
+            }
+            REQUIRE(returned);
+            REQUIRE(completion.get() == 0);
+            REQUIRE(ReportedSuccess(statuses));
+            device->Close();
+        });
+        suite.Add("update-with-reset-waits-for-disconnect-" + console, [=] {
+            test::TempDirectory bootDirectory;
+            test::TempDirectory updateDirectory;
+            test::ScriptedUSBDevice *usbProbe = nullptr;
+            StatusCollector statuses;
+            auto device = ServeWholeUpdate(bootDirectory, updateDirectory, uEnvSupport, true,
+                usbProbe, statuses);
+
+            // The device may still be writing flash; only the reset's disconnect completes it.
+            auto completion = std::async(std::launch::async, [&] { return device->WaitForCompletion(); });
+            const bool returnedEarly =
+                completion.wait_for(std::chrono::milliseconds(1500)) == std::future_status::ready;
+            REQUIRE(!ReportedSuccess(statuses));
+            usbProbe->Emit(USBDevice::USB_DEVICE_EVENT_NO_DEVICE);
+            REQUIRE(completion.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+            REQUIRE(!returnedEarly);
+            REQUIRE(completion.get() == 0);
+            REQUIRE(ReportedSuccess(statuses));
+            device->Close();
+        });
+    }
     return suite.Run(argc, argv);
 }

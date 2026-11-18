@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -21,16 +23,22 @@ constexpr uint32_t kKeyResendSpkVersion = 0xA00C0307U;
 class BootRomUSB final : public test::ScriptedUSBDevice
 {
 public:
-    explicit BootRomUSB(uint32_t spkVersion, bool invalidVersionResponse = false)
-        : m_spkVersion(spkVersion), m_invalidVersionResponse(invalidVersionResponse)
+    // How the simulated BootROM answers the SPK version query (opcode 0x03).
+    enum class VersionReply { Valid, BadSync, None };
+
+    explicit BootRomUSB(uint32_t spkVersion, VersionReply versionReply = VersionReply::Valid)
+        : m_spkVersion(spkVersion), m_versionReply(versionReply)
     {
         SetOnWrite([this](const std::vector<uint8_t> &packet) {
             if (packet.size() < 4) {
                 return;
             }
+            if (packet[3] == 0x03 && m_versionReply == VersionReply::None) {
+                return;
+            }
 
             std::vector<uint8_t> response(8, 0);
-            response[0] = m_invalidVersionResponse && packet[3] == 0x03 ? 0 : 0x5B;
+            response[0] = m_versionReply == VersionReply::BadSync && packet[3] == 0x03 ? 0 : 0x5B;
             response[1] = 0x5A;
             if (packet[3] == 0x03) {
                 response[4] = static_cast<uint8_t>(m_spkVersion);
@@ -48,7 +56,7 @@ public:
 
 private:
     uint32_t m_spkVersion;
-    bool m_invalidVersionResponse;
+    VersionReply m_versionReply;
 };
 
 std::shared_ptr<AstraBootImage> MakeBootImage(const test::TempDirectory &directory)
@@ -72,11 +80,12 @@ std::vector<uint8_t> UploadOpcodes(const std::vector<std::vector<uint8_t>> &writ
     return opcodes;
 }
 
-void RequireBootROMUploadSequence(uint32_t spkVersion, std::vector<uint8_t> expectedOpcodes)
+void RequireBootROMUploadSequence(uint32_t spkVersion, std::vector<uint8_t> expectedOpcodes,
+    BootRomUSB::VersionReply versionReply = BootRomUSB::VersionReply::Valid)
 {
     test::TempDirectory directory;
     const auto image = MakeBootImage(directory);
-    auto usb = std::make_unique<BootRomUSB>(spkVersion);
+    auto usb = std::make_unique<BootRomUSB>(spkVersion, versionReply);
     auto *usbProbe = usb.get();
     auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
         true, "", false);
@@ -170,7 +179,9 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     usbProbe->requestImage.store(true);
     REQUIRE(waitingFuture.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
 
-    const bool useFastboot = flag == "true" && reset;
+    // Fastboot re-entry confirms completion whether or not reset is enabled;
+    // only the reboot that follows depends on it.
+    const bool useFastboot = flag == "true";
     FastbootUSB *reboundProbe = nullptr;
     if (useFastboot) {
         auto rebound = std::make_unique<FastbootUSB>();
@@ -197,13 +208,75 @@ void RequireFlashCompletion(const std::string &flag, bool reset = true, bool acc
     REQUIRE(device->GetDeviceStatus() == (failed
         ? ASTRA_DEVICE_STATUS_UPDATE_FAIL : ASTRA_DEVICE_STATUS_UPDATE_COMPLETE));
     if (!failed) {
-        REQUIRE(completionMessage == "Success");
+        REQUIRE(completionMessage == (useFastboot && !reset
+            ? "Reset disabled: device left in U-Boot fastboot mode" : "Success"));
     }
     REQUIRE(legacyRegistrations.load() == (useFastboot ? 0 : 1));
-    if (reboundProbe && openRebind) {
+    if (reboundProbe && openRebind && reset) {
         REQUIRE(reboundProbe->Writes() == std::vector<std::vector<uint8_t>>{
             {'r', 'e', 'b', 'o', 'o', 't'}});
         REQUIRE(reboundProbe->ReadTimeouts().size() == 1);
+    } else if (reboundProbe && openRebind) {
+        REQUIRE(reboundProbe->Writes().empty());
+    }
+    device->Close();
+}
+
+// A U-Boot without fastboot re-entry support flashes but never returns to
+// fastboot. The timeout failure must say how to stop that happening.
+void RequireFastbootReentryTimeoutExplainsFix()
+{
+    test::TempDirectory directory;
+    auto fields = test::BootManifest();
+    fields["fastboot_vendor_id"] = "18D1";
+    fields["fastboot_product_id"] = "4EE0";
+    fields["fastboot_reboot"] = "true";
+    test::WriteBootManifest(directory, fields);
+    auto bootImage = std::make_shared<AstraBootImage>(directory.Path().string());
+    REQUIRE(bootImage->Load());
+
+    auto usb = std::make_unique<FastbootUSB>();
+    auto *usbProbe = usb.get();
+    auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
+        false, "", false);
+    device->SetPostFlashFastbootTimeout(std::chrono::milliseconds(100));
+    std::promise<void> waiting;
+    auto waitingFuture = waiting.get_future();
+    std::mutex messageMutex;
+    std::string failureMessage;
+    device->SetStatusCallback([&](AstraDeviceManagerResponse response) {
+        if (response.IsDeviceResponse()) {
+            const auto event = response.GetDeviceResponse();
+            if (event.m_status == ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE && event.m_imageName.empty()) {
+                waiting.set_value();
+            } else if (event.m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL) {
+                std::lock_guard<std::mutex> lock(messageMutex);
+                failureMessage = event.m_message;
+            }
+        }
+    });
+    device->SetRegistrationCallbacks([](const std::string &) {}, [](const std::string &) {},
+        [](const std::string &) {}, [](const std::string &) {});
+
+    REQUIRE(device->Boot(bootImage, ASTRA_DEVICE_BOOT_STAGE_AUTO) == 0);
+    REQUIRE(device->Update(std::make_shared<FinalFlashImage>(directory, true)) == 0);
+    usbProbe->requestImage.store(true);
+    REQUIRE(waitingFuture.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+
+    // No Rebind(): the device never re-enters fastboot.
+    auto completion = std::async(std::launch::async, [&] { return device->WaitForCompletion(); });
+    const bool completed = completion.wait_for(std::chrono::seconds(2)) == std::future_status::ready;
+    if (!completed) {
+        device->Close();
+    }
+    REQUIRE(completed);
+    REQUIRE(completion.get() == -1);
+    REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_FAIL);
+    {
+        std::lock_guard<std::mutex> lock(messageMutex);
+        REQUIRE(failureMessage.find("post-flash fastboot re-entry") != std::string::npos);
+        REQUIRE(failureMessage.find("may have been written") != std::string::npos);
+        REQUIRE(failureMessage.find("--fastboot_reboot false") != std::string::npos);
     }
     device->Close();
 }
@@ -228,8 +301,60 @@ int main(int argc, char **argv)
     suite.Add("post-flash-fastboot-open-failure-does-not-report-success", [] {
         RequireFlashCompletion("true", true, true, false);
     });
-    suite.Add("disabled-reset-does-not-send-fastboot-reboot", [] {
+    suite.Add("disabled-reset-completes-on-fastboot-reentry-without-reboot", [] {
         RequireFlashCompletion("true", false);
+    });
+    suite.Add("disabled-reset-without-fastboot-reboot-keeps-final-boot-wait", [] {
+        RequireFlashCompletion("false", false);
+    });
+    suite.Add("fastboot-reentry-timeout-fails-and-suggests-fastboot-reboot-false", [] {
+        RequireFastbootReentryTimeoutExplainsFix();
+    });
+    // Boot image directories load recursively, so nested files have names
+    // like "keys/readme.txt". The BootROM payload lookups must only consider
+    // top-level files, or a directory name could satisfy a substring match.
+    suite.Add("bootrom-payload-lookup-ignores-nested-files", [] {
+        test::TempDirectory directory;
+        test::WriteBootManifest(directory, test::BootManifest());
+        directory.Write("spk.bin", "spk-payload");
+        directory.Write("m52bl.bin", "m52bl-payload");
+        directory.Write(std::filesystem::path("keys") / "readme.txt", "not a key");
+        auto image = std::make_shared<AstraBootImage>(directory.Path().string());
+        REQUIRE(image->Load());
+
+        auto usb = std::make_unique<BootRomUSB>(kKeyResendSpkVersion);
+        auto *usbProbe = usb.get();
+        auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
+            true, "", false);
+
+        REQUIRE(device->Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == -1);
+        REQUIRE(usbProbe->Writes().empty());
+        REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_BOOT_FAIL);
+        device->Close();
+    });
+    suite.Add("bootrom-payload-lookup-uses-top-level-fallback-over-nested-file", [] {
+        test::TempDirectory directory;
+        test::WriteBootManifest(directory, test::BootManifest());
+        directory.Write("board_key.bin", "key-payload");
+        directory.Write(std::filesystem::path("keys") / "key.bin", "nested key");
+        directory.Write("spk.bin", "spk-payload");
+        directory.Write("m52bl.bin", "m52bl-payload");
+        auto image = std::make_shared<AstraBootImage>(directory.Path().string());
+        REQUIRE(image->Load());
+
+        auto usb = std::make_unique<BootRomUSB>(kKeyResendSpkVersion - 1);
+        auto *usbProbe = usb.get();
+        auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
+            true, "", false);
+
+        REQUIRE(device->Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == 1);
+        const auto writes = usbProbe->Writes();
+        REQUIRE(UploadOpcodes(writes) == std::vector<uint8_t>({0x01, 0x02, 0x03, 0x04}));
+        // The key upload carries the top-level file's payload.
+        const std::string payload = "key-payload";
+        REQUIRE(writes[0].size() >= payload.size());
+        REQUIRE(std::string(writes[0].end() - payload.size(), writes[0].end()) == payload);
+        device->Close();
     });
     suite.Add("old-spk-does-not-resend-key", [] {
         RequireBootROMUploadSequence(kKeyResendSpkVersion - 1, {0x01, 0x02, 0x03, 0x04});
@@ -237,18 +362,15 @@ int main(int argc, char **argv)
     suite.Add("spk-at-key-resend-threshold-resends-key-before-m52bl", [] {
         RequireBootROMUploadSequence(kKeyResendSpkVersion, {0x01, 0x02, 0x03, 0x01, 0x04});
     });
-    suite.Add("invalid-spk-version-response-fails-before-m52bl", [] {
-        test::TempDirectory directory;
-        const auto image = MakeBootImage(directory);
-        auto usb = std::make_unique<BootRomUSB>(kKeyResendSpkVersion, true);
-        auto *usbProbe = usb.get();
-        auto device = CreateAstraDeviceSL26XXImpl(std::move(usb), directory.Path().string(),
-            true, "", false);
-
-        REQUIRE(device->Boot(image, ASTRA_DEVICE_BOOT_STAGE_AUTO) == -1);
-        REQUIRE(UploadOpcodes(usbProbe->Writes()) == std::vector<uint8_t>({0x01, 0x02, 0x03}));
-        REQUIRE(device->GetDeviceStatus() == ASTRA_DEVICE_STATUS_BOOT_FAIL);
-        device->Close();
+    // An SPK that does not answer the version query is treated as one older
+    // than the key-resend threshold: no key resend, and the boot continues.
+    suite.Add("invalid-spk-version-response-continues-without-key-resend", [] {
+        RequireBootROMUploadSequence(kKeyResendSpkVersion, {0x01, 0x02, 0x03, 0x04},
+            BootRomUSB::VersionReply::BadSync);
+    });
+    suite.Add("unanswered-spk-version-query-continues-without-key-resend", [] {
+        RequireBootROMUploadSequence(kKeyResendSpkVersion, {0x01, 0x02, 0x03, 0x04},
+            BootRomUSB::VersionReply::None);
     });
     return suite.Run(argc, argv);
 }

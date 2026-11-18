@@ -538,12 +538,18 @@ private:
     // needlessly long when the real signal is missed.
     static constexpr std::chrono::seconds kPostFlashGracePeriod{300};
     static constexpr std::chrono::seconds kPostFlashFastbootTimeout{480};
+    std::atomic<std::chrono::milliseconds> m_postFlashFastbootTimeout{kPostFlashFastbootTimeout};
 
     // Set by NotifyFinalBootDetected() when the post-flash Linux boot gadget
     // arrives on this device's registered USB path.
     std::atomic<bool> m_finalBootDetected{false};
     std::mutex m_finalBootMutex;
     std::condition_variable m_finalBootCV;
+
+    void SetPostFlashFastbootTimeout(std::chrono::milliseconds timeout) override
+    {
+        m_postFlashFastbootTimeout.store(timeout);
+    }
 
     void NotifyFinalBootDetected() override
     {
@@ -560,6 +566,7 @@ private:
     {
         ASTRA_LOG;
 
+        const std::chrono::milliseconds timeout = m_postFlashFastbootTimeout.load();
         std::string failure;
         if (!m_rebindArmed.load() && !ArmRebindMode("post-flash fastboot re-entry")) {
             failure = "Cannot wait for post-flash fastboot re-entry without a registered UUID";
@@ -567,7 +574,7 @@ private:
             bool reenteredFastboot = false;
             {
                 std::unique_lock<std::mutex> lock(m_rebindMutex);
-                m_rebindCV.wait_for(lock, kPostFlashFastbootTimeout, [this] {
+                m_rebindCV.wait_for(lock, timeout, [this] {
                     return m_rebindReady.load() || m_shutdown.load() || !m_running.load();
                 });
                 reenteredFastboot = m_rebindReady.exchange(false);
@@ -579,7 +586,20 @@ private:
             if (!m_running.load()) {
                 failure = "Fastboot connection failed while waiting for post-flash re-entry";
             } else if (!reenteredFastboot) {
-                failure = "Timeout waiting for post-flash fastboot re-entry";
+                // The write may well have finished: a U-Boot without fastboot
+                // re-entry support runs the flash but never comes back.
+                failure = "Timed out after " +
+                    std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                        timeout).count()) +
+                    " s waiting for post-flash fastboot re-entry. The image may have been written."
+                    " If this boot image's U-Boot cannot re-enter fastboot after flashing,"
+                    " set fastboot_reboot: false in its manifest"
+                    " (generate_manifest.py --fastboot_reboot false)";
+            } else if (!m_resetWhenComplete) {
+                // Re-entry confirms the write finished; reset is disabled, so
+                // leave the board in U-Boot fastboot mode.
+                log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing; reset disabled, not rebooting" << endLog;
+                m_updateCompletionMessage = "Reset disabled: device left in U-Boot fastboot mode";
             } else {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX: device re-entered fastboot after flashing, sending reboot" << endLog;
                 std::lock_guard<std::mutex> lock(m_deviceMutex);
@@ -607,7 +627,7 @@ private:
         ReportStatus(ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE, 0, "",
             "Device processing final image");
 
-        if (m_fastbootReboot && !m_bootOnly && m_resetWhenComplete) {
+        if (m_fastbootReboot && !m_bootOnly) {
             WaitForFastbootReboot();
             m_rebindArmed.store(false);
             m_running.store(false);
@@ -901,7 +921,10 @@ private:
         return ReadResponseCode(true, timeout);
     }
 
-    bool GetBootloaderVersion(uint32_t &version)
+    // Sends a BootROM-service version query and reads the version from the
+    // response header. Returns false if the request cannot be written or no
+    // valid response arrives; |what| names the queried component in logs.
+    bool QueryBootServiceVersion(uint8_t opcode, const char *what, uint32_t &version)
     {
         ASTRA_LOG;
 
@@ -912,7 +935,7 @@ private:
         packet.push_back(kHostSync1);
         packet.push_back(kHostSync2);
         packet.push_back(kServiceIdBoot);
-        packet.push_back(kOpcodeVersion);
+        packet.push_back(opcode);
         AppendU32LE(packet, 0);
         AppendU32LE(packet, 0);
         AppendU32LE(packet, 0);
@@ -924,22 +947,22 @@ private:
         ClearRxBuffer();
 
         if (!WriteAll(packet.data(), packet.size())) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX BL version request" << endLog;
+            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX " << what << " version request" << endLog;
             return false;
         }
 
         std::vector<uint8_t> responseHeader;
         if (!ReadExactBytes(kHostHeaderSize, responseHeader, std::chrono::seconds(2))) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX BL version response" << endLog;
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX " << what << " version response" << endLog;
             return false;
         }
 
         if (responseHeader[0] != kHostSync1 || responseHeader[1] != kHostSync2) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX BL version response" << endLog;
+            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX " << what << " version response" << endLog;
             return false;
         }
 
-        // BL VERSION typically encodes version in response header bytes [4..7].
+        // The version is encoded in response header bytes [4..7].
         version = ReadU32LE(&responseHeader[4]);
 
         // Some ROM variants append an extra 4-byte word after the response header.
@@ -949,52 +972,14 @@ private:
         return true;
     }
 
+    bool GetBootloaderVersion(uint32_t &version)
+    {
+        return QueryBootServiceVersion(kOpcodeVersion, "BL", version);
+    }
+
     bool GetSPKVersion(uint32_t &version)
     {
-        ASTRA_LOG;
-
-        version = 0;
-
-        std::vector<uint8_t> packet;
-        packet.reserve(kOpHeaderSize);
-        packet.push_back(kHostSync1);
-        packet.push_back(kHostSync2);
-        packet.push_back(kServiceIdBoot);
-        packet.push_back(kOpcodeSpkVersion);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-        AppendU32LE(packet, 0);
-
-        ClearRxBuffer();
-
-        if (!WriteAll(packet.data(), packet.size())) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to send SL26XX BL version request" << endLog;
-            return false;
-        }
-
-        std::vector<uint8_t> responseHeader;
-        if (!ReadExactBytes(kHostHeaderSize, responseHeader, std::chrono::seconds(2))) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Timed out waiting for SL26XX BL version response" << endLog;
-            return false;
-        }
-
-        if (responseHeader[0] != kHostSync1 || responseHeader[1] != kHostSync2) {
-            log(ASTRA_LOG_LEVEL_DEBUG) << "Invalid sync bytes in SL26XX BL version response" << endLog;
-            return false;
-        }
-
-        // BL VERSION typically encodes version in response header bytes [4..7].
-        version = ReadU32LE(&responseHeader[4]);
-
-        // Some ROM variants append an extra 4-byte word after the response header.
-        std::vector<uint8_t> trailing;
-        (void)ReadExactBytes(sizeof(uint32_t), trailing, std::chrono::milliseconds(50));
-
-        return true;
+        return QueryBootServiceVersion(kOpcodeSpkVersion, "SPK", version);
     }
 
     bool GetSysMgrVersion(uint32_t &version)
@@ -1058,6 +1043,16 @@ private:
         return true;
     }
 
+    // BootROM-stage payloads (key, SPK, M52BL, SysMgr, BL, TZK) are the files
+    // at the top of the boot image directory. Since boot image directories
+    // are loaded recursively, nested files have relative names such as
+    // "keys/readme.txt"; skip them so the substring fallbacks below cannot
+    // match a directory name.
+    static bool IsTopLevelBootImage(const Image &image)
+    {
+        return image.GetName().find('/') == std::string::npos;
+    }
+
     const Image *FindKeyBootImage(const AstraBootImage &bootImage)
     {
         static const std::array<const char *, 1> kPreferredNames = {
@@ -1065,6 +1060,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1074,6 +1072,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("key") != std::string::npos) {
                 return &image;
@@ -1090,6 +1091,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1099,6 +1103,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("spk") != std::string::npos) {
                 return &image;
@@ -1115,6 +1122,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1124,6 +1134,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("m52") != std::string::npos && imageName.find("bl") != std::string::npos) {
                 return &image;
@@ -1158,16 +1171,20 @@ private:
             return false;
         }
 
+        // SPKs older than the key-resend threshold may not answer the version
+        // query. Treat no answer as an old SPK and skip the key resend; if the
+        // SPK is actually unresponsive, the M52BL upload below fails.
         uint32_t spkVersion = 0;
-        if (!GetSPKVersion(spkVersion)) {
-            log(ASTRA_LOG_LEVEL_ERROR) << "Failed to read SPK version" << endLog;
-            return false;
+        if (GetSPKVersion(spkVersion)) {
+            log(ASTRA_LOG_LEVEL_INFO) << "SL26XX SPK version: " << VersionToString(spkVersion)
+                                      << " (0x" << std::hex << std::uppercase << spkVersion
+                                      << std::dec << ")" << endLog;
+        } else {
+            spkVersion = 0;
+            log(ASTRA_LOG_LEVEL_WARNING) << "SL26XX SPK did not report its version; assuming it predates "
+                                         << VersionToString(kSpkVersionKeyResendThreshold)
+                                         << " and not resending the key image" << endLog;
         }
-
-
-        log(ASTRA_LOG_LEVEL_INFO) << "SL26XX SPK version: " << VersionToString(spkVersion)
-                                  << " (0x" << std::hex << std::uppercase << spkVersion
-                                  << std::dec << ")" << endLog;
 
         if (spkVersion >= kSpkVersionKeyResendThreshold) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "SL26XX SPK version supports resending key image" << endLog;
@@ -1192,6 +1209,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredSysMgrNames) {
                 if (imageName == preferredName) {
@@ -1201,6 +1221,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("sysmgr") != std::string::npos)
             {
@@ -1251,6 +1274,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1260,6 +1286,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("bl") != std::string::npos &&
                 imageName.find("m52") == std::string::npos &&
@@ -1278,6 +1307,9 @@ private:
         };
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             for (const char *preferredName : kPreferredNames) {
                 if (imageName == preferredName) {
@@ -1287,6 +1319,9 @@ private:
         }
 
         for (const Image &image : bootImage.GetImages()) {
+            if (!IsTopLevelBootImage(image)) {
+                continue;
+            }
             const std::string imageName = ToLower(image.GetName());
             if (imageName.find("tzk") != std::string::npos) {
                 return &image;
@@ -1441,13 +1476,25 @@ private:
     // -----------------------------------------------------------------------
     // Virtual hook: WakeImageRequestThread
     // Notify all CVs so a thread blocked in WaitForImageRequest, WaitForRebind,
-    // or any rx-buffer wait wakes up promptly when m_running is cleared by
-    // Close() / shutdown.
+    // WaitForFastbootReboot, WaitForFlashWriteToFinish or any rx-buffer wait
+    // wakes up promptly when m_running / m_shutdown is changed by Close() /
+    // shutdown.
+    //
+    // Each notify is made while holding that CV's mutex. The flags are
+    // atomics written without these mutexes, so a bare notify could land
+    // after a waiter has checked its predicate but before it blocks, and the
+    // waiter would then sleep for its whole timeout (up to 480 s).
     // -----------------------------------------------------------------------
     void WakeImageRequestThread() override
     {
-        m_rebindCV.notify_all();
-        m_finalBootCV.notify_all();
+        {
+            std::lock_guard<std::mutex> lock(m_rebindMutex);
+            m_rebindCV.notify_all();
+        }
+        {
+            std::lock_guard<std::mutex> lock(m_finalBootMutex);
+            m_finalBootCV.notify_all();
+        }
         std::lock_guard<std::mutex> lock(m_rxMutex);
         m_rxCV.notify_all();
     }
@@ -1501,7 +1548,7 @@ private:
             })) {
             log(ASTRA_LOG_LEVEL_ERROR) << "SL26XX fastboot: failed to open new device after rebind" << endLog;
             m_fastbootDevice.reset();
-            if (m_fastbootReboot && !m_bootOnly && m_resetWhenComplete &&
+            if (m_fastbootReboot && !m_bootOnly &&
                 m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE)
             {
                 m_status = ASTRA_DEVICE_STATUS_UPDATE_FAIL;
@@ -1509,7 +1556,12 @@ private:
             }
             m_running.store(false);
             SignalDeviceEvent();
-            m_rebindCV.notify_all();
+            {
+                // Under the mutex so WaitForRebind / WaitForFastbootReboot
+                // cannot miss the m_running change (see WakeImageRequestThread).
+                std::lock_guard<std::mutex> lock(m_rebindMutex);
+                m_rebindCV.notify_all();
+            }
             return;
         }
 

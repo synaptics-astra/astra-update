@@ -67,10 +67,13 @@ void AstraDeviceImpl::BuildBootImageList(std::shared_ptr<AstraBootImage> bootIma
 // ---------------------------------------------------------------------------
 void AstraDeviceImpl::AppendUpdateImages(std::shared_ptr<FlashImage> flashImage)
 {
-    m_finalUpdateImage  = flashImage->GetFinalImage();
+    // Update() runs while the image-request loop is already serving boot
+    // images, so publish everything the loop reads under m_imageMutex (the
+    // loop holds it while matching a request against m_finalUpdateImage).
     m_resetWhenComplete = flashImage->GetResetWhenComplete();
 
     std::lock_guard<std::mutex> lock(m_imageMutex);
+    m_finalUpdateImage = flashImage->GetFinalImage();
     const std::vector<Image> &imgs = flashImage->GetImages();
     m_images.insert(m_images.end(), imgs.begin(), imgs.end());
 }
@@ -175,7 +178,13 @@ void AstraDeviceImpl::RunImageRequestLoop()
     ASTRA_LOG;
 
     log(ASTRA_LOG_LEVEL_DEBUG) << "Signal image request thread ready" << endLog;
-    m_imageRequestThreadReady.store(true);
+    {
+        // Publish under the CV's mutex: otherwise the store and notify can
+        // land between StartImageRequestThread()'s predicate check and its
+        // wait, and that wakeup is lost for good.
+        std::lock_guard<std::mutex> lock(m_imageRequestThreadReadyMutex);
+        m_imageRequestThreadReady.store(true);
+    }
     m_imageRequestThreadReadyCV.notify_all();
 
     bool waitForSizeRequest = false;
@@ -184,8 +193,7 @@ void AstraDeviceImpl::RunImageRequestLoop()
         std::string requestedImageName;
         uint8_t imageType = 0;
 
-        const auto timeout = std::chrono::seconds(10);
-        bool gotRequest = WaitForImageRequest(requestedImageName, imageType, timeout);
+        bool gotRequest = WaitForImageRequest(requestedImageName, imageType, m_imageRequestIdleTimeout);
 
         if (!m_running.load()) {
             log(ASTRA_LOG_LEVEL_DEBUG) << "Image request loop: shutting down" << endLog;
@@ -212,8 +220,10 @@ void AstraDeviceImpl::RunImageRequestLoop()
                 // device may still be writing the final image to flash, so
                 // leave m_running / the device event alone here and let the
                 // real disconnect handler trigger the completion status.
+                // Without a reset no disconnect will ever arrive, so the
+                // idle timeout is the only completion signal available.
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Update complete: shutting down image request thread" << endLog;
-                if (m_completeOnIdleTimeout) {
+                if (m_completeOnIdleTimeout || !m_resetWhenComplete) {
                     m_running.store(false);
                     SignalDeviceEvent();
                 }
@@ -257,11 +267,17 @@ void AstraDeviceImpl::RunImageRequestLoop()
         {
             std::lock_guard<std::mutex> lock(m_imageMutex);
 
-            auto it = std::find_if(m_images.begin(), m_images.end(),
-                [&imageNameCandidates](const Image &img) {
-                    return std::find(imageNameCandidates.begin(), imageNameCandidates.end(),
-                        img.GetName()) != imageNameCandidates.end();
-                });
+            // Candidates run from most to least specific; try each in turn so
+            // "sub/img.bin" is never answered with a top-level "img.bin"
+            // that happens to come first in m_images.
+            auto it = m_images.end();
+            for (const auto &candidate : imageNameCandidates) {
+                it = std::find_if(m_images.begin(), m_images.end(),
+                    [&candidate](const Image &img) { return img.GetName() == candidate; });
+                if (it != m_images.end()) {
+                    break;
+                }
+            }
 
             if (it == m_images.end()) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Requested image not found: " << requestedImageName << endLog;
@@ -352,7 +368,15 @@ void AstraDeviceImpl::RunImageRequestLoop()
                 << "'  finalUpdate='" << m_finalUpdateImage << "'" << endLog;
 
             // ---- completion tracking ----
-            if (!m_finalBootImage.empty() &&
+            // Once the update has started, the final boot image (re-served,
+            // or matched by an update image's name) must not move the status
+            // back to BOOT_COMPLETE: that would report BOOT_COMPLETE again and
+            // then UPDATE_START again for the next update image.
+            const bool updateStarted =
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_START ||
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_PROGRESS ||
+                m_status == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE;
+            if (!updateStarted && !m_finalBootImage.empty() &&
                 image.GetName().find(m_finalBootImage) != std::string::npos)
             {
                 log(ASTRA_LOG_LEVEL_DEBUG) << "Final boot image sent" << endLog;

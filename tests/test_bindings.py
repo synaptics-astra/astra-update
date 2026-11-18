@@ -448,6 +448,16 @@ class TestStaticMethods:
         except ImportError as e:
             pytest.skip(f"Bindings not available: {e}")
 
+    @pytest.mark.parametrize("value", [17, 31, 40])
+    def test_status_to_string_rejects_out_of_range_status(self, value):
+        """Out-of-range statuses must not read past the native name table."""
+        try:
+            from astra_update import AstraDevice, DeviceStatus
+        except ImportError as e:
+            pytest.skip(f"Bindings not available: {e}")
+
+        assert AstraDevice.status_to_string(DeviceStatus(value)) == "ASTRA_DEVICE_STATUS_UNKNOWN"
+
     def test_astra_device_series_to_string(self):
         """Test AstraDevice.series_to_string()."""
         try:
@@ -475,28 +485,80 @@ class TestStaticMethods:
 
 
 class TestResponseQueue:
-    """Test ResponseQueue access."""
+    """Each manager has its own response queue."""
 
-    def test_get_response_queue_instance(self):
-        """Test getting ResponseQueue singleton."""
+    @staticmethod
+    def _boot_image_dir(path):
+        path.mkdir()
+        (path / "manifest.yaml").write_text(
+            "id: queue-test\n"
+            "chip: sl1680\n"
+            "board: test-board\n"
+            "console: uart\n"
+            "uenv_support: false\n"
+            "vendor_id: '1234'\n"
+            "product_id: '5678'\n"
+            "secure_boot: gen2\n"
+            "memory_layout: 4gb\n"
+            "uboot: uboot\n"
+            "uboot_version: '2025.01'\n",
+            encoding="utf-8",
+        )
+        (path / "minildr.img").write_bytes(b"boot")
+        return path
+
+    def test_new_manager_queue_starts_empty(self, tmp_path):
         try:
-            from astra_update import ResponseQueue
-            
-            queue = ResponseQueue.get_instance()
-            assert queue is not None
+            from astra_update import AstraDeviceManager
         except ImportError as e:
             pytest.skip(f"Bindings not available: {e}")
 
-    def test_response_queue_empty(self):
-        """Test that queue starts empty."""
+        manager = AstraDeviceManager(temp_dir=str(tmp_path / "temp"))
+        queue = manager.get_response_queue()
+        assert queue.is_empty()
+        assert queue.size() == 0
+        assert manager.response_queue_size() == 0
+        assert manager.get_response() is None
+        manager.shutdown()
+
+    def test_responses_do_not_leak_between_managers(self, tmp_path):
         try:
-            from astra_update import ResponseQueue
-            
-            queue = ResponseQueue.get_instance()
-            assert queue.is_empty()
-            assert queue.size() == 0
+            from astra_update import AstraDeviceManager
         except ImportError as e:
             pytest.skip(f"Bindings not available: {e}")
+
+        boot_dir = self._boot_image_dir(tmp_path / "boot")
+
+        first = AstraDeviceManager(temp_dir=str(tmp_path / "first"))
+        first.boot(str(boot_dir))
+        # boot() reports the boot image description and the start status
+        # before returning, without needing a device. Leave them undrained.
+        assert first.response_queue_size() >= 2
+        first.shutdown()
+        del first
+
+        second = AstraDeviceManager(temp_dir=str(tmp_path / "second"))
+        assert second.response_queue_size() == 0
+        assert second.get_response() is None
+        second.shutdown()
+
+    def test_response_queue_outlives_its_manager(self, tmp_path):
+        try:
+            from astra_update import AstraDeviceManager
+        except ImportError as e:
+            pytest.skip(f"Bindings not available: {e}")
+
+        boot_dir = self._boot_image_dir(tmp_path / "boot")
+        manager = AstraDeviceManager(temp_dir=str(tmp_path / "temp"))
+        queue = manager.get_response_queue()
+        manager.boot(str(boot_dir))
+        manager.shutdown()
+        pending = manager.response_queue_size()
+        assert pending >= 2
+        del manager
+
+        assert queue.size() == pending
+        assert queue.get() is not None
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ Boot images are specific to the Astra SoC and board. Astra Update imports a coll
 
 Update images can also contain their own ``manifest.yaml`` file which specifies which boot image it requires. The boot image ID can also be set as a command line parameter. If an update image does not specify a boot image ID, then Astra Update can try to determine the correct boot image based on the characteristics of the update image. Manifest files are required for boot images, but are optional for update images.
 
-Automatic selection requires matching the chip and secure boot version. The boot image's memory layout must be less than or equal to the update image's target memory layout: for example, a 512mb boot image can serve 512mb, 1gb, or 2gb targets, but a 2gb boot image cannot serve a 1gb target. All compatible memory sizes remain eligible under the existing U-Boot/uEnv/console preferences; exact memory matches are not given extra priority. Use ``--board any`` or ``board: any`` in an update image manifest to explicitly allow any board; a specific board name must match. An omitted or empty board remains unrestricted for backward compatibility. When a DDR type is specified, it must also match; omitting it leaves that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
+Automatic selection requires matching the chip and secure boot version. The boot image's memory layout must be less than or equal to the update image's target memory layout: for example, a 512mb boot image can serve 512mb, 1gb, or 2gb targets, but a 2gb boot image cannot serve a 1gb target. All compatible memory sizes remain eligible, and the U-Boot/uEnv/console preferences decide first: Synaptics U-Boot with uEnv support, then any uEnv support, then a USB console. Among equally preferred images the largest memory layout wins, and any remaining tie goes to the first boot image directory in path order. Use ``--board any`` or ``board: any`` in an update image manifest to explicitly allow any board; a specific board name must match. An omitted or empty board remains unrestricted for backward compatibility. When a DDR type is specified, it must also match; omitting it leaves that constraint unrestricted. For SL261x variants above SL2610, matching images for the exact chip are preferred, with SL2610 images considered only if no exact-chip image satisfies all the constraints.
 
 Boot image manifests can optionally declare ``xspi_support: true`` or
 ``xspi_support: false``. For SPI updates, automatic selection excludes explicit
@@ -36,19 +36,26 @@ When using [generate_manifest.py](tools/generate_manifest.py), pass
 If the option is not supplied, the field is omitted for legacy compatibility.
 
 Boot manifests can declare ``fastboot_reboot: true`` for SL261x U-Boot builds
-that support returning to fastboot after flashing. With reset enabled, the host
-waits up to eight minutes for fastboot re-entry, sends ``reboot``, reads its
-acknowledgement, and completes without further USB I/O. A timeout or reboot failure is
-reported as an update failure. Missing or ``false`` retains the existing plain
-reset and Linux USB gadget detection, including its five-minute fallback.
-Other device series and updates with reset disabled do not use fastboot reboot.
+that support returning to fastboot after flashing. The host waits up to eight
+minutes for fastboot re-entry, which confirms the flash write has finished.
+With reset enabled it then sends ``reboot``, reads its acknowledgement, and
+completes without further USB I/O. With reset disabled it does not reboot: the
+update completes and the board is left in U-Boot fastboot mode. A timeout or
+reboot failure is reported as an update failure. Missing or ``false`` retains
+the existing plain reset and Linux USB gadget detection, including its
+five-minute fallback; with reset disabled no gadget appears, so such updates
+always wait the full five minutes. Other device series do not use fastboot
+reboot.
 
 The generator emits ``fastboot_reboot: true`` by default only for SL261x boot
 manifests; other chips default to ``false``. An explicit
 ``--fastboot_reboot true`` is rejected for non-SL261x chips. This check uses
 the chip resolved from ``--sdk_config`` or its ``--chip`` override.
 Use ``--fastboot_reboot false`` when packaging older U-Boot builds that do not
-support this flow. This flag describes the USB boot image, not the flashed image.
+support this flow. With such a U-Boot and ``fastboot_reboot: true``, the flash
+itself still runs, but the update is reported as failed after the eight-minute
+wait; the failure message points at this option. This flag describes the USB
+boot image, not the flashed image.
 
 ### Generating manifests during a build
 
@@ -116,7 +123,8 @@ with an empty image name during its final flash/reboot wait. These events do not
 claim that the protocol can distinguish individual erase and write phases.
 
 For SL261x updates with `fastboot_reboot: true`, completion is confirmed when
-U-Boot acknowledges the host's fastboot `reboot` command. Otherwise, the
+the device re-enters fastboot after flashing (and, with reset enabled, when
+U-Boot acknowledges the host's fastboot `reboot` command). Otherwise, the
 post-flash Linux USB gadget (`1D6B:0104`) on the updating device's USB port path
 ends the final wait. Detection uses enumeration metadata only: it does not open
 or claim the gadget, so denied libusb access does not hide an enumerated

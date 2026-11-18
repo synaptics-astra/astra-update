@@ -54,6 +54,7 @@ public:
 
     void SetSizeRequest(std::string name) { m_sizeRequestImageFilename = std::move(name); }
     void SetCompleteOnIdleTimeout(bool value) { m_completeOnIdleTimeout = value; }
+    void SetResetWhenComplete(bool value) { m_resetWhenComplete = value; }
     void SetStatus(AstraDeviceStatus status) { m_status = status; }
     void SetDeviceDirectory(const std::filesystem::path &path) { m_deviceDir = path.string(); }
     void SetUuid(std::string uuid) { m_updateSessionUuid = std::move(uuid); }
@@ -450,6 +451,33 @@ int main(int argc, char **argv)
         REQUIRE(statuses[1].m_progress == 100);
         REQUIRE(statuses[2].m_message == "Success");
     });
+    for (const bool nestedFirst : {false, true}) {
+        suite.Add(std::string("request-prefers-most-specific-image-name-")
+            + (nestedFirst ? "nested-first" : "top-level-first"), [=] {
+            test::TempDirectory directory;
+            const auto topLevel = directory.Write("img.bin", "top-level");
+            const auto nested = directory.Write("sub/img.bin", "nested");
+            RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
+            if (nestedFirst) {
+                probe.AddImage(nested, "sub/img.bin");
+                probe.AddImage(topLevel, "img.bin");
+            } else {
+                probe.AddImage(topLevel, "img.bin");
+                probe.AddImage(nested, "sub/img.bin");
+            }
+            probe.Queue({"sub/img.bin", 0});
+            probe.Queue({"img.bin", 0});
+            probe.Queue({"device-prefix/sub/img.bin", 0});
+            probe.Queue({"device-prefix\\img.bin", 0});
+            probe.Queue({"device-prefix/elsewhere/img.bin", 0});
+            REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_BOOT_START) == 0);
+            REQUIRE(probe.WaitForSentCount(5));
+            probe.Stop();
+            REQUIRE(probe.Payloads() == std::vector<std::string>({
+                "nested", "top-level", "nested", "top-level", "top-level"}));
+            probe.Close();
+        });
+    }
     suite.Add("update-final-image-and-idle-completion", [] {
         test::TempDirectory directory;
         const auto payload = directory.Write("final.img", "firmware");
@@ -604,6 +632,7 @@ int main(int argc, char **argv)
     suite.Add("update-idle-timeout-can-await-real-disconnect", [] {
         RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
         probe.SetCompleteOnIdleTimeout(false);
+        probe.SetResetWhenComplete(true);
         probe.QueueTimeout();
         REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) == 0);
         REQUIRE(probe.WaitForRequestCount(1));
@@ -612,6 +641,18 @@ int main(int argc, char **argv)
         REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
         probe.Stop();
         REQUIRE(!probe.Running());
+        probe.Close();
+    });
+    suite.Add("update-idle-timeout-completes-when-no-reset-will-disconnect", [] {
+        RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
+        probe.SetCompleteOnIdleTimeout(false);
+        probe.SetResetWhenComplete(false);
+        probe.QueueTimeout();
+        REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_UPDATE_COMPLETE) == 0);
+        REQUIRE(probe.WaitForRequestCount(1));
+        probe.JoinLoop();
+        REQUIRE(!probe.Running());
+        REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
         probe.Close();
     });
     suite.Add("stop-wakes-blocked-request-hook-and-close-is-idempotent", [] {
@@ -625,6 +666,35 @@ int main(int argc, char **argv)
         REQUIRE(raw->CloseCount() == 1);
         REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_CLOSED);
     });
+    // The status only moves forward: boot statuses, then update statuses.
+    // Re-serving the final boot image mid-update (or an update image whose
+    // name contains it) must not report BOOT_COMPLETE and UPDATE_START again.
+    for (const bool updateNameMatches : {false, true}) {
+        suite.Add(std::string("final-boot-image-after-update-start-does-not-flap-status-")
+                + (updateNameMatches ? "update-image-name" : "reserved-boot-image"), [updateNameMatches] {
+            test::TempDirectory directory;
+            RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());
+            probe.CaptureStatuses();
+            probe.AddImage(directory.Write("uEnv.txt", "env"), "uEnv.txt");
+            probe.AddImage(directory.Write("a.img", "a"), "a.img", ASTRA_IMAGE_TYPE_UPDATE_EMMC);
+            probe.AddImage(directory.Write("uEnv.txt.img", "u"), "uEnv.txt.img", ASTRA_IMAGE_TYPE_UPDATE_EMMC);
+            probe.AddImage(directory.Write("b.img", "b"), "b.img", ASTRA_IMAGE_TYPE_UPDATE_EMMC);
+            probe.SetFinalImages("uEnv.txt", "b.img");
+            probe.Queue({"uEnv.txt", 0});
+            probe.Queue({"a.img", 0});
+            probe.Queue({updateNameMatches ? "uEnv.txt.img" : "uEnv.txt", 0});
+            probe.Queue({"b.img", 0});
+            probe.QueueTimeout();
+            REQUIRE(probe.Start(ASTRA_DEVICE_STATUS_BOOT_START) == 0);
+            REQUIRE(probe.WaitForRequestCount(5));
+            probe.JoinLoop();
+            REQUIRE(probe.GetDeviceStatus() == ASTRA_DEVICE_STATUS_UPDATE_COMPLETE);
+            const auto sequence = StatusSequence(probe.Statuses());
+            REQUIRE(std::count(sequence.begin(), sequence.end(), ASTRA_DEVICE_STATUS_BOOT_COMPLETE) == 1);
+            REQUIRE(std::count(sequence.begin(), sequence.end(), ASTRA_DEVICE_STATUS_UPDATE_START) == 1);
+            probe.Close();
+        });
+    }
     suite.Add("characterization-final-image-match-is-substring-based", [] {
         test::TempDirectory directory;
         RequestLoopProbe probe(std::make_unique<test::ScriptedUSBDevice>());

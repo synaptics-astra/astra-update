@@ -187,4 +187,24 @@ inline void ReportImageProgress(const DeviceResponse &deviceResponse, bool simpl
     }
 }
 
+// Report IMAGE_SEND_FAIL. It is not necessarily fatal (after a boot a device
+// can fail one image and keep serving others; a fatal failure is followed by
+// BOOT_FAIL or UPDATE_FAIL), so this only ends that image's progress bar,
+// shown in red, and prints the failure.
+inline void ReportImageSendFailure(const DeviceResponse &deviceResponse,
+    indicators::DynamicProgress<indicators::ProgressBar> &dynamicProgress,
+    ProgressBars &progressBars)
+{
+    const DeviceImageKey key{deviceResponse.m_deviceName, deviceResponse.m_imageName};
+    auto bar = progressBars.find(key);
+    if (bar != progressBars.end()) {
+        auto &progressBar = dynamicProgress[bar->second];
+        progressBar.set_option(indicators::option::ForegroundColor{indicators::Color::red});
+        progressBar.mark_as_completed();
+        progressBars.erase(bar);
+    }
+    std::cerr << "Sending " << deviceResponse.m_imageName << " to " << deviceResponse.m_deviceName
+              << " failed: " << deviceResponse.m_message << std::endl;
+}
+
 } // namespace astra_cli

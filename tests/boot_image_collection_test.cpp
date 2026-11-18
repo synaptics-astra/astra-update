@@ -461,6 +461,80 @@ int main(int argc, char **argv)
         REQUIRE(matches.size() == 1);
         REQUIRE(matches.front()->GetID() == "small-exact-chip");
     });
+    for (const bool smallerSortsFirst : {true, false}) {
+        suite.Add(std::string("selection-prefers-largest-compatible-layout-")
+            + (smallerSortsFirst ? "smaller-first" : "larger-first"), [=] {
+            for (const auto target : orderedLayouts) {
+                test::TempDirectory directory;
+                for (const auto boot : orderedLayouts) {
+                    auto fields = test::BootManifest(boot.name);
+                    fields["memory_layout"] = boot.name;
+                    const auto rank = LayoutRank(boot.value);
+                    const auto position = smallerSortsFirst ? rank : std::size(orderedLayouts) - rank;
+                    test::WriteBootManifest(directory, fields, std::to_string(position) + "-" + boot.name);
+                }
+                BootImageCollection collection(directory.Path().string());
+                collection.Load();
+                const auto matches = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+                    target.value, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk", FLASH_IMAGE_TYPE_EMMC);
+                const auto selected = BootImageCollection::SelectPreferredBootImage(matches);
+                REQUIRE(selected != nullptr);
+                REQUIRE(selected->GetID() == target.name);
+            }
+        });
+    }
+    suite.Add("selection-uboot-preferences-outrank-memory-layout", [] {
+        struct Candidate { const char *id; const char *layout; const char *uboot; const char *uenv; const char *console; };
+        const struct {
+            Candidate preferred;
+            Candidate larger;
+        } cases[] = {
+            {{"usb-console", "1gb", "uboot", "false", "usb"}, {"uart-console", "4gb", "uboot", "false", "uart"}},
+            {{"uenv", "1gb", "uboot", "true", "uart"}, {"usb-console", "4gb", "uboot", "false", "usb"}},
+            {{"suboot-uenv", "1gb", "suboot", "true", "uart"}, {"uboot-uenv", "4gb", "uboot", "true", "usb"}},
+        };
+        for (const auto &entry : cases) {
+            for (const bool preferredFirst : {true, false}) {
+                test::TempDirectory directory;
+                for (const auto &candidate : {entry.preferred, entry.larger}) {
+                    auto fields = test::BootManifest(candidate.id);
+                    fields["memory_layout"] = candidate.layout;
+                    fields["uboot"] = candidate.uboot;
+                    fields["uenv_support"] = candidate.uenv;
+                    fields["console"] = candidate.console;
+                    const bool isPreferred = std::string(candidate.id) == entry.preferred.id;
+                    test::WriteBootManifest(directory, fields,
+                        std::string(isPreferred == preferredFirst ? "a-" : "b-") + candidate.id);
+                }
+                BootImageCollection collection(directory.Path().string());
+                collection.Load();
+                const auto matches = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+                    ASTRA_MEMORY_LAYOUT_4GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk");
+                REQUIRE(matches.size() == 2);
+                const auto selected = BootImageCollection::SelectPreferredBootImage(matches);
+                REQUIRE(selected != nullptr);
+                REQUIRE(selected->GetID() == entry.preferred.id);
+            }
+        }
+    });
+    suite.Add("selection-full-tie-uses-directory-order", [] {
+        test::TempDirectory directory;
+        for (const std::string name : {"c", "a", "b"}) {
+            test::WriteBootManifest(directory, test::BootManifest(name), name);
+        }
+        BootImageCollection collection(directory.Path().string());
+        collection.Load();
+        const auto matches = collection.GetBootImagesForChip("sl2619", ASTRA_SECURE_BOOT_V3,
+            ASTRA_MEMORY_LAYOUT_2GB, ASTRA_MEMORY_DDR_TYPE_NOT_SPECIFIED, "rdk");
+        REQUIRE(matches.size() == 3);
+        REQUIRE(matches[0]->GetID() == "a");
+        REQUIRE(matches[1]->GetID() == "b");
+        REQUIRE(matches[2]->GetID() == "c");
+        REQUIRE(BootImageCollection::SelectPreferredBootImage(matches)->GetID() == "a");
+    });
+    suite.Add("selection-of-empty-list-is-null", [] {
+        REQUIRE(BootImageCollection::SelectPreferredBootImage({}) == nullptr);
+    });
     suite.Add("invalid-target-memory-layout-is-rejected", [] {
         test::TempDirectory directory;
         BootImageCollection collection(directory.Path().string());

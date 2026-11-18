@@ -16,6 +16,7 @@
 #include <deque>
 #include "astra_device.hpp"
 #include "astra_device_manager.hpp"
+#include "astra_device_manager_internal.hpp"
 #include "boot_image_collection.hpp"
 #include "fastboot_device.hpp"
 #include "libusb_transport.hpp"
@@ -29,6 +30,60 @@
 #include "win_libusb_transport.hpp"
 #include "win_usb_cdc_transport.hpp"
 #endif
+
+namespace {
+
+std::mutex &TransportFactoryMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+USBTransportFactory &TransportFactory()
+{
+    static USBTransportFactory factory;
+    return factory;
+}
+
+USBTransportFactory GetTransportFactory()
+{
+    std::lock_guard<std::mutex> lock(TransportFactoryMutex());
+    return TransportFactory();
+}
+
+} // namespace
+
+void SetUSBTransportFactoryForTesting(USBTransportFactory factory)
+{
+    std::lock_guard<std::mutex> lock(TransportFactoryMutex());
+    TransportFactory() = std::move(factory);
+}
+
+std::string FlashCompletionCommand(AstraDeviceSeries series, bool fastbootReboot, bool resetWhenComplete)
+{
+    const bool fastbootReentry = series == ASTRA_SERIES_SL26XX && fastbootReboot;
+    if (!resetWhenComplete && !fastbootReentry) {
+        return "";
+    }
+    return AstraDevice::GetFlashCompletionCommand(series, fastbootReboot);
+}
+
+std::shared_ptr<FastbootArrival> ClaimFastbootArrival(
+    std::deque<std::shared_ptr<FastbootArrival>> &pending, const std::string &usbPath)
+{
+    if (pending.empty()) {
+        return nullptr;
+    }
+    auto match = std::find_if(pending.begin(), pending.end(),
+        [&usbPath](const std::shared_ptr<FastbootArrival> &arrival) { return arrival->usbPath == usbPath; });
+    if (match == pending.end()) {
+        match = pending.begin();
+    }
+    std::shared_ptr<FastbootArrival> claimed = *match;
+    pending.erase(match);
+    claimed->arrived = true;
+    return claimed;
+}
 
 class AstraDeviceManager::AstraDeviceManagerImpl {
 public:
@@ -105,22 +160,11 @@ public:
                 }
                 throw std::runtime_error("No boot image found for chip: " + m_flashImage->GetChipName());
             } else if (bootImages.size() > 1) {
-                m_bootImage = bootImages[0];
                 for (const auto& bootImage : bootImages) {
                     log(ASTRA_LOG_LEVEL_INFO) << "Boot Image: " << bootImage->GetChipName() << " " << bootImage->GetBoardName() << endLog;
-                    if (bootImage->GetUbootVariant() == ASTRA_UBOOT_VARIANT_SYNAPTICS && bootImage->GetUEnvSupport()) {
-                        // Boot bootImages with Synaptics u-boot variant is preferred
-                        m_bootImage = bootImage;
-                        break;
-                    } else if (bootImage->GetUEnvSupport()) {
-                        // Boot bootImages with uEnv support is preferred
-                        m_bootImage = bootImage;
-                    } else if (!m_bootImage->GetUEnvSupport() && bootImage->GetUbootConsole() == ASTRA_UBOOT_CONSOLE_USB) {
-                        // Boot bootImages with USB console is preferred over UART
-                        // But only if there is no uEnv support
-                        m_bootImage = bootImage;
-                    }
                 }
+                m_bootImage = BootImageCollection::SelectPreferredBootImage(bootImages);
+                log(ASTRA_LOG_LEVEL_INFO) << "Selected boot image: " << m_bootImage->GetID() << endLog;
             } else {
                 // Try the only option
                 m_bootImage = bootImages[0];
@@ -305,10 +349,6 @@ private:
     uint16_t m_fastbootVid = 0;
     uint16_t m_fastbootPid = 0;
 
-    struct FastbootArrival {
-        std::chrono::steady_clock::time_point deadline;
-        bool arrived = false;
-    };
     std::mutex m_fastbootArrivalMutex;
     std::condition_variable m_fastbootArrivalCV;
     std::deque<std::shared_ptr<FastbootArrival>> m_pendingFastbootArrivals;
@@ -477,14 +517,12 @@ private:
 
         m_deviceSeries = DetectDeviceSeries(m_bootImage->GetChipName());
 
-        if (m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE && m_flashImage &&
-            m_flashImage->GetResetWhenComplete())
-        {
+        if (m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE && m_flashImage) {
             // The flash command itself is series-agnostic; append the
             // device-specific tail here (e.g. reset vs re-enter fastboot)
             // now that the series is known.
-            m_bootCommand += AstraDevice::GetFlashCompletionCommand(m_deviceSeries,
-                m_bootImage->GetFastbootReboot());
+            m_bootCommand += FlashCompletionCommand(m_deviceSeries,
+                m_bootImage->GetFastbootReboot(), m_flashImage->GetResetWhenComplete());
         }
 
         bootImageDescription += "    Device Series: " + AstraDevice::AstraDeviceSeriesToString(m_deviceSeries) + "\n";
@@ -527,19 +565,24 @@ private:
             vendorProductIds.push_back({kLinuxGadgetVid, kLinuxGadgetPid});
         }
 
+        const USBTransportFactory transportFactory = GetTransportFactory();
+        if (transportFactory) {
+            m_transport = transportFactory(m_transportType, m_usbDebug);
+        } else {
 #if PLATFORM_WINDOWS
-        if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
-            m_transport = std::make_shared<WinUSBCDCTransport>(m_usbDebug);
-        } else {
-            m_transport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
-        }
+            if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+                m_transport = std::make_shared<WinUSBCDCTransport>(m_usbDebug);
+            } else {
+                m_transport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
+            }
 #else
-        if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
-            m_transport = std::make_shared<PosixUSBCDCTransport>(m_usbDebug);
-        } else {
-            m_transport = std::make_shared<LibUSBTransport>(m_usbDebug);
-        }
+            if (m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+                m_transport = std::make_shared<PosixUSBCDCTransport>(m_usbDebug);
+            } else {
+                m_transport = std::make_shared<LibUSBTransport>(m_usbDebug);
+            }
 #endif
+        }
 
         log(ASTRA_LOG_LEVEL_INFO) << "Using USB transport: "
             << (m_transportType == ASTRA_TRANSPORT_USB_CDC ? "cdc" : "usb") << endLog;
@@ -561,11 +604,15 @@ private:
 
         // When the primary is CDC, fastboot devices are bulk USB and need a separate libusb transport.
         if (fbVid != 0 && fbPid != 0 && m_transportType == ASTRA_TRANSPORT_USB_CDC) {
+            if (transportFactory) {
+                m_fastbootTransport = transportFactory(ASTRA_TRANSPORT_USB, m_usbDebug);
+            } else {
 #if PLATFORM_WINDOWS
-            m_fastbootTransport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
+                m_fastbootTransport = std::make_shared<WinLibUSBTransport>(m_usbDebug);
 #else
-            m_fastbootTransport = std::make_shared<LibUSBTransport>(m_usbDebug);
+                m_fastbootTransport = std::make_shared<LibUSBTransport>(m_usbDebug);
 #endif
+            }
             log(ASTRA_LOG_LEVEL_INFO) << "Creating secondary libusb transport for fastboot VID:0x"
                 << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << fbVid
                 << " PID:0x" << std::setw(4) << std::setfill('0') << fbPid << std::dec << endLog;
@@ -601,6 +648,15 @@ private:
         ResponseCallback({ManagerResponse{ASTRA_DEVICE_MANAGER_STATUS_START, os.str()}});
     }
 
+    static bool IsFailureStatus(AstraDeviceStatus status)
+    {
+        return status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
+            status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
+            status == ASTRA_DEVICE_STATUS_UPDATE_FAIL;
+    }
+
+    // Every response, from the manager or from a device, goes through here
+    // so that failures set the Shutdown() result and keep the logs.
     void ResponseCallback(AstraDeviceManagerResponse response)
     {
         // If a failure is reported then retain the temp directory containing logs
@@ -610,10 +666,7 @@ private:
                 m_failureReported = true;
             }
         } else if (response.IsDeviceResponse()) {
-            if (response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_OPEN_FAIL ||
-                response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_BOOT_FAIL ||
-                response.GetDeviceResponse().m_status == ASTRA_DEVICE_STATUS_UPDATE_FAIL)
-            {
+            if (IsFailureStatus(response.GetDeviceResponse().m_status)) {
                 m_removeTempOnClose = false;
                 m_failureReported = true;
             }
@@ -639,12 +692,31 @@ private:
                 return;
             }
 
-            astraDevice->SetStatusCallback(m_responseCallback);
+            // Route device statuses through ResponseCallback() so device-reported
+            // failures count, and remember whether this device reported one so
+            // the manager can report failures the device left silent without
+            // duplicating ones it did report. Device threads are joined and
+            // devices closed in Shutdown() before this object is destroyed.
+            auto deviceReportedFailure = std::make_shared<std::atomic<bool>>(false);
+            astraDevice->SetStatusCallback([this, deviceReportedFailure](AstraDeviceManagerResponse response) {
+                if (response.IsDeviceResponse() && IsFailureStatus(response.GetDeviceResponse().m_status)) {
+                    deviceReportedFailure->store(true);
+                }
+                ResponseCallback(std::move(response));
+            });
+            const auto reportFailureIfSilent = [this, &astraDevice, &deviceReportedFailure](
+                AstraDeviceStatus status, const std::string &message)
+            {
+                if (!deviceReportedFailure->load()) {
+                    ResponseCallback({DeviceResponse{astraDevice->GetDeviceName(), status, 0, "", message}});
+                }
+            };
 
             std::shared_ptr<FastbootArrival> arrival;
             if (expectsFastboot) {
                 arrival = std::make_shared<FastbootArrival>();
                 arrival->deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
+                arrival->usbPath = astraDevice->GetUSBPath();
                 std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
                 m_pendingFastbootArrivals.push_back(arrival);
             }
@@ -665,9 +737,8 @@ private:
                     m_transport->UnblockDeviceEnumeration();
                     if (m_fastbootTransport) { m_fastbootTransport->UnblockDeviceEnumeration(); }
                 }
-                if (!openFailed) {
-                    ResponseCallback({ DeviceResponse{astraDevice->GetDeviceName(), ASTRA_DEVICE_STATUS_BOOT_FAIL, 0, "", "Failed to Boot Device"}});
-                }
+                reportFailureIfSilent(openFailed ? ASTRA_DEVICE_STATUS_OPEN_FAIL : ASTRA_DEVICE_STATUS_BOOT_FAIL,
+                    openFailed ? "Failed to initialize device connection" : "Failed to Boot Device");
                 return;
             }
 
@@ -692,7 +763,8 @@ private:
                     const bool timedOut = !ready && !m_shuttingDown.load();
                     lock.unlock();
                     if (timedOut) {
-                        const std::string message = "Timed out waiting for fastboot enumeration after 120 seconds";
+                        const std::string message = "Timed out waiting for fastboot enumeration after 120 seconds"
+                            " (device on USB path " + arrival->usbPath + ")";
                         log(ASTRA_LOG_LEVEL_ERROR) << message << endLog;
                         if (!m_runContinuously) {
                             m_completed.store(true);
@@ -720,6 +792,7 @@ private:
                 ret = astraDevice->Update(m_flashImage);
                 if (ret < 0) {
                     log(ASTRA_LOG_LEVEL_ERROR) << "Failed to update device" << endLog;
+                    reportFailureIfSilent(ASTRA_DEVICE_STATUS_UPDATE_FAIL, "Failed to update device");
                     m_transport->RemoveActiveDevice(astraDevice->GetUSBPath());
                     if (m_fastbootTransport) { m_fastbootTransport->RemoveActiveDevice(astraDevice->GetUSBPath()); }
                     if (enumerationBlocked) {
@@ -734,6 +807,11 @@ private:
             ret = astraDevice->WaitForCompletion();
             if (ret < 0) {
                 log(ASTRA_LOG_LEVEL_ERROR) << "Failed to wait for completion" << endLog;
+                const AstraDeviceStatus failedStatus = astraDevice->GetDeviceStatus();
+                reportFailureIfSilent(IsFailureStatus(failedStatus) ? failedStatus
+                    : (m_managerMode == ASTRA_DEVICE_MANAGER_MODE_UPDATE ? ASTRA_DEVICE_STATUS_UPDATE_FAIL
+                        : ASTRA_DEVICE_STATUS_BOOT_FAIL),
+                    "Device did not complete");
                 // Remove from active set first (before Close() which may block),
                 // then close to release the libusb handle, then unblock enumeration
                 // so ProcessPendingDevices can accept a reconnect.
@@ -751,6 +829,12 @@ private:
             log(ASTRA_LOG_LEVEL_DEBUG) << "returned from WaitForCompletion" << endLog;
             AstraDeviceStatus status = astraDevice->GetDeviceStatus();
             log(ASTRA_LOG_LEVEL_DEBUG) << "Device status: " << AstraDevice::AstraDeviceStatusToString(status) << endLog;
+
+            // A device can end in a failed state without having reported it
+            // (e.g. SL16xx suppresses events for its 07_IMAGE size reply).
+            if (IsFailureStatus(status)) {
+                reportFailureIfSilent(status, "Device did not complete");
+            }
 
             // Determine whether this is a terminal-success state.  The SHUTDOWN
             // response is intentionally sent AFTER all cleanup below so that the
@@ -874,10 +958,11 @@ private:
         const bool isFastboot = m_fastbootVid != 0 && m_fastbootPid != 0 &&
             device->GetVendorId() == m_fastbootVid && device->GetProductId() == m_fastbootPid;
         if (isFastboot) {
+            const std::string &arrivalPath = device->GetUSBPath();
             std::lock_guard<std::mutex> lock(m_fastbootArrivalMutex);
-            if (!m_pendingFastbootArrivals.empty()) {
-                m_pendingFastbootArrivals.front()->arrived = true;
-                m_pendingFastbootArrivals.pop_front();
+            if (auto claimed = ClaimFastbootArrival(m_pendingFastbootArrivals, arrivalPath)) {
+                log(ASTRA_LOG_LEVEL_DEBUG) << "Fastboot device on " << arrivalPath
+                    << " satisfies the device waiting on " << claimed->usbPath << endLog;
                 m_fastbootArrivalCV.notify_all();
             }
         }

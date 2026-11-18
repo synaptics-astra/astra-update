@@ -46,13 +46,23 @@ int main(int argc, char **argv)
         {ASTRA_DEVICE_STATUS_IMAGE_SEND_START, "ASTRA_DEVICE_STATUS_IMAGE_SEND_START"},
         {ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS, "ASTRA_DEVICE_STATUS_IMAGE_SEND_PROGRESS"},
         {ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE, "ASTRA_DEVICE_STATUS_IMAGE_SEND_COMPLETE"},
-        {ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL, "ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL"}
+        {ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL, "ASTRA_DEVICE_STATUS_IMAGE_SEND_FAIL"},
+        {ASTRA_DEVICE_STATUS_OPEN_FAIL, "ASTRA_DEVICE_STATUS_OPEN_FAIL"},
+        {ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE, "ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE"}
     };
     for (const auto &status : statuses) {
         suite.Add("status-" + status.second, [=] {
             REQUIRE(AstraDevice::AstraDeviceStatusToString(status.first) == status.second);
         });
     }
+    suite.Add("status-out-of-range-is-unknown", [] {
+        // 17 is one past the last status; 31 is the largest value the enum can
+        // represent. Neither may read past the name table.
+        for (const int value : {ASTRA_DEVICE_STATUS_WAITING_FOR_DEVICE + 1, 31}) {
+            REQUIRE(AstraDevice::AstraDeviceStatusToString(static_cast<AstraDeviceStatus>(value))
+                == "ASTRA_DEVICE_STATUS_UNKNOWN");
+        }
+    });
     suite.Add("device-series-and-completion-commands", [] {
         const std::map<AstraDeviceSeries, std::string> series = {
             {ASTRA_SERIES_SL16XX, "SL16XX"}, {ASTRA_SERIES_SL26XX, "SL26XX"}, {ASTRA_SERIES_SR1XX, "SR1XX"}
