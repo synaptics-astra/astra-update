@@ -303,6 +303,26 @@ These command line parameters describe the update image. If the image contains a
 * -d, --ddr-type arg - the ddr type of the update image.
 * -r, --disable-reset - Do not reset the device after a successful update.
 
+### Debugging
+
+Astra Update provides debug logging to help diagnose problems. Use the
+``--debug`` or ``-D`` flag to enable it.
+
+```bash
+astra-update --debug --flash /home/user/Downloads/sl1680
+```
+
+The debug log, ``astra_device_manager.log``, is stored in the system's default
+temporary directory. Use ``--temp-dir`` or ``-T`` to specify a temporary
+directory and make the log file easier to find.
+
+```bash
+astra-update --debug --temp-dir tmp --flash /home/user/Downloads/sl1680
+```
+
+Please attach the ``astra_device_manager.log`` file when submitting a support
+ticket.
+
 ### Running on Windows
 
 Astra Update requires a USB Kernel Driver to be installed on Windows. See
